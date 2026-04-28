@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(pip install:*)",
+      "Bash(pip list:*)",
+      "Bash(findstr /i \"rich click jinja2 tree-sitter\")",
+      "Bash(python test_self.py)",
+      "Bash(python:*)",
+      "WebFetch(domain:deepwiki.com)",
+      "Bash(dir D:\\\\AI\\\\code_analysis_agent\\\\src\\\\models:*)",
+      "Bash(timeout 3)",
+      "Bash(curl -s http://localhost:8888/api/projects)",
+      "Bash(curl -s http://localhost:8888/api/Dapper-main/overview)",
+      "Bash(dir D:\\\\AI\\\\code_analysis_agent\\\\output:*)",
+      "Bash(taskkill /F /PID 8872)",
+      "Bash(taskkill /F /PID 12156)",
+      "Bash(taskkill /im python.exe /f)",
+      "Bash(taskkill //f //im python.exe)",
+      "Bash(curl -s http://localhost:8888/api/projects -w \"\\\\nStatus: %{http_code}\")",
+      "Bash(curl -s \"http://localhost:8888/api/Dapper-main/code/Dapper/SqlMapper.cs\")",
+      "Bash(curl -s -X POST http://localhost:8888/api/Dapper-main/chat -H 'Content-Type: application/json' -d '{\"project_name\":\"Dapper-main\",\"message\":\"query方法\",\"history\":[]}')",
+      "Bash(taskkill /F /IM python.exe)",
+      "Bash(curl -s \"http://localhost:8888/api/config\")",
+      "Bash(sqlite3:*)",
+      "Bash(netstat -ano)",
+      "Bash(xargs -I {} taskkill /F /PID {} sleep 2 echo \"Port 8888 freed\" cd /d/AI/code_analysis_agent python -c \" import uvicorn uvicorn.run\\('web.main:app', host='0.0.0.0', port=8888, log_level='info'\\) \")",
+      "Bash(xargs -I {} taskkill /F /PID {} sleep 2 echo \"Port 8888 cleared\" cd /d/AI/code_analysis_agent python run_server.py)",
+      "Bash(taskkill:*)",
+      "Bash(.venv/Scripts/pip install *)",
+      "Bash(.venv/Scripts/python.exe -c \"import pydantic, openai, tiktoken, tree_sitter; print\\(f'pydantic: {pydantic.__version__}'\\); print\\(f'openai: {openai.__version__}'\\); print\\(f'tiktoken: {tiktoken.__version__}'\\); print\\('All imports OK!'\\)\")",
+      "Bash(.venv/Scripts/python.exe main.py --help)",
+      "Bash(.venv/Scripts/python.exe web/main.py)",
+      "Bash(curl -s http://localhost:8888/api/config)",
+      "Bash(awk '{print $1}')"
+    ]
+  }
+}

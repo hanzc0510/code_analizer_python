@@ -1,0 +1,1906 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>代码分析工具</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <!-- highlight.js 代码高亮 -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/atom-one-dark.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/core.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/languages/javascript.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/languages/typescript.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/languages/python.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/languages/java.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/languages/csharp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/languages/css.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/languages/xml.min.js"></script>
+
+    <!-- 新增项目弹窗 -->
+    <div id="newProjectModal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50">
+        <div class="bg-gray-800 rounded-xl p-6 w-full max-w-md border border-gray-700 shadow-xl mx-4">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-semibold">分析新项目</h3>
+                <button onclick="closeNewProjectModal()" class="text-gray-400 hover:text-white">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">项目路径</label>
+                    <input type="text" id="newProjectPath" placeholder="例如: D:\Projects\my-app" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">项目名称 (可选，留空则使用目录名)</label>
+                    <input type="text" id="newProjectName" placeholder="例如: MyApp" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary">
+                </div>
+            </div>
+            <div class="flex items-center justify-end gap-3 mt-6">
+                <button onclick="closeNewProjectModal()" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm transition">取消</button>
+                <button onclick="startNewProjectAnalysis()" id="startAnalysisBtn" class="px-4 py-2 bg-gradient-to-r from-primary to-secondary hover:opacity-90 rounded-lg text-sm font-medium transition flex items-center gap-2">
+                    开始分析
+                </button>
+            </div>
+            <div id="analysisProgress" class="hidden mt-4">
+                <div class="text-sm text-gray-400 mb-2">分析中，请稍候...</div>
+                <div class="w-full bg-gray-700 rounded-full h-2">
+                    <div class="bg-primary h-2 rounded-full animate-pulse" style="width: 100%"></div>
+                </div>
+            </div>
+            <div id="analysisError" class="hidden mt-4 text-sm text-red-400"></div>
+        </div>
+    </div>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#4F46E5',
+                        secondary: '#7C3AED',
+                        accent: '#06B6D4',
+                        dark: '#1F2937',
+                        danger: '#DC2626',
+                        warning: '#F59E0B',
+                        success: '#10B981',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .code-font { font-family: 'Consolas', 'Monaco', monospace; }
+        .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+        .scrollbar-thin::-webkit-scrollbar-thumb { background: #4B5563; border-radius: 3px; }
+        .scrollbar-thin::-webkit-scrollbar-track { background: #1F2937; }
+        .tab-active { border-bottom: 2px solid #4F46E5; color: #4F46E5; }
+        .node-highlight { stroke: #F59E0B; stroke-width: 3; }
+        .badge { padding: 2px 8px; border-radius: 9999px; font-size: 12px; font-weight: 500; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+    <div id="app" class="flex flex-col h-screen">
+        <!-- 顶部导航 -->
+        <header class="bg-gray-800 border-b border-gray-700 px-6 py-3 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 bg-gradient-to-br from-primary to-secondary rounded-lg flex items-center justify-center">
+                    <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4z"/>
+                    </svg>
+                </div>
+                <h1 class="text-xl font-bold">代码分析工具</h1>
+            </div>
+            <div class="flex items-center gap-4">
+                <select id="projectSelector" class="bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary min-w-[200px]">
+                    <option value="">选择项目...</option>
+                </select>
+                <button onclick="reanalyzeProject()" id="btnReanalyze" class="px-3 py-2 bg-secondary hover:bg-secondary/80 rounded-lg text-sm transition flex items-center gap-1" disabled title="请先选择项目">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                    </svg>
+                    重新分析
+                </button>
+                <button onclick="openNewProjectModal()" class="px-3 py-2 bg-primary hover:bg-primary/80 rounded-lg text-sm transition flex items-center gap-1">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                    </svg>
+                    新增项目
+                </button>
+                <span id="statusIndicator" class="flex items-center gap-2 text-sm text-gray-400">
+                    <span class="w-2 h-2 bg-gray-500 rounded-full"></span>
+                    未加载项目
+                </span>
+            </div>
+        </header>
+
+        <!-- 主内容区 -->
+        <div class="flex-1 flex overflow-hidden">
+            <!-- 左侧边栏 - 导航 -->
+            <nav class="w-56 bg-gray-800 border-r border-gray-700 p-4">
+                <ul class="space-y-1">
+                    <li>
+                        <button onclick="switchTab('overview')" id="tab-overview" class="w-full text-left px-4 py-2.5 rounded-lg hover:bg-gray-700 transition tab-active flex items-center gap-3">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/>
+                            </svg>
+                            项目概览
+                        </button>
+                    </li>
+                    <li>
+                        <button onclick="switchTab('callgraph')" id="tab-callgraph" class="w-full text-left px-4 py-2.5 rounded-lg hover:bg-gray-700 transition flex items-center gap-3">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                            </svg>
+                            调用关系图
+                        </button>
+                    </li>
+                    <li>
+                        <button onclick="switchTab('classes')" id="tab-classes" class="w-full text-left px-4 py-2.5 rounded-lg hover:bg-gray-700 transition flex items-center gap-3">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
+                            </svg>
+                            类结构
+                        </button>
+                    </li>
+                    <li>
+                        <button onclick="switchTab('methods')" id="tab-methods" class="w-full text-left px-4 py-2.5 rounded-lg hover:bg-gray-700 transition flex items-center gap-3">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                            </svg>
+                            方法列表
+                        </button>
+                    </li>
+                    <li>
+                        <button onclick="switchTab('business')" id="tab-business" class="w-full text-left px-4 py-2.5 rounded-lg hover:bg-gray-700 transition flex items-center gap-3">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+                            </svg>
+                            <span class="flex-1">AI 深度分析</span>
+                            <span class="badge bg-accent/20 text-accent">AI</span>
+                        </button>
+                    </li>
+                    <li>
+                        <button onclick="switchTab('code')" id="tab-code" class="w-full text-left px-4 py-2.5 rounded-lg hover:bg-gray-700 transition flex items-center gap-3">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
+                            </svg>
+                            代码浏览
+                        </button>
+                    </li>
+                    <li>
+                        <button onclick="switchTab('deep-analysis')" id="tab-deep-analysis" class="w-full text-left px-4 py-2.5 rounded-lg hover:bg-gray-700 transition flex items-center gap-3">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                            </svg>
+                            <span class="flex-1">深度分析</span>
+                            <span class="badge bg-primary/20 text-primary">AI</span>
+                        </button>
+                    </li>
+                    <li>
+                        <button onclick="switchTab('chat')" id="tab-chat" class="w-full text-left px-4 py-2.5 rounded-lg hover:bg-gray-700 transition flex items-center gap-3">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+                            </svg>
+                            <span class="flex-1">AI 对话</span>
+                            <span class="badge bg-accent/20 text-accent">RAG</span>
+                        </button>
+                    </li>
+                </ul>
+            </nav>
+
+            <!-- 主内容 -->
+            <main class="flex-1 overflow-hidden">
+                <!-- 概览面板 -->
+                <div id="panel-overview" class="h-full p-6 overflow-auto scrollbar-thin">
+                    <h2 class="text-2xl font-bold mb-6">项目概览</h2>
+
+                    <!-- 统计卡片 -->
+                    <div class="grid grid-cols-4 gap-4 mb-8">
+                        <div class="bg-gray-800 rounded-xl p-5 border border-gray-700">
+                            <div class="text-gray-400 text-sm mb-1">文件数</div>
+                            <div id="statFiles" class="text-3xl font-bold text-accent">-</div>
+                        </div>
+                        <div class="bg-gray-800 rounded-xl p-5 border border-gray-700">
+                            <div class="text-gray-400 text-sm mb-1">类数量</div>
+                            <div id="statClasses" class="text-3xl font-bold text-secondary">-</div>
+                        </div>
+                        <div class="bg-gray-800 rounded-xl p-5 border border-gray-700">
+                            <div class="text-gray-400 text-sm mb-1">方法数</div>
+                            <div id="statMethods" class="text-3xl font-bold text-primary">-</div>
+                        </div>
+                        <div class="bg-gray-800 rounded-xl p-5 border border-gray-700">
+                            <div class="text-gray-400 text-sm mb-1">复杂度等级</div>
+                            <div id="statLevel" class="text-xl font-bold text-warning">-</div>
+                        </div>
+                    </div>
+
+                    <!-- 核心模块 -->
+                    <div class="bg-gray-800 rounded-xl border border-gray-700 p-5 mb-6">
+                        <h3 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                            <svg class="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                            </svg>
+                            核心模块 (按代码量排序)
+                        </h3>
+                        <div id="topModulesList" class="space-y-2">
+                            <!-- 动态填充 -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 调用图面板 -->
+                <div id="panel-callgraph" class="h-full hidden flex flex-col">
+                    <div class="p-4 border-b border-gray-700 flex items-center gap-3">
+                        <h2 class="text-lg font-semibold flex-1">调用关系图</h2>
+                        <input type="text" id="callgraphSearch" placeholder="搜索方法名..." class="bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm w-48 focus:outline-none focus:ring-1 focus:ring-primary">
+                        <button onclick="refreshCallGraph()" class="px-3 py-1.5 bg-primary hover:bg-primary/80 rounded text-sm transition">刷新</button>
+                    </div>
+                    <div id="callgraphChart" class="flex-1"></div>
+                </div>
+
+                <!-- 类面板 -->
+                <div id="panel-classes" class="h-full hidden flex flex-col">
+                    <div class="p-4 border-b border-gray-700">
+                        <input type="text" id="classSearch" placeholder="搜索类名..." class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-primary" oninput="filterClasses()">
+                    </div>
+                    <div id="classesList" class="flex-1 overflow-auto scrollbar-thin p-4 space-y-2">
+                        <!-- 动态填充 -->
+                    </div>
+                    <div id="classesPagination" class="p-3 border-t border-gray-700 bg-gray-800">
+                        <!-- 分页控件动态填充 -->
+                    </div>
+                </div>
+
+                <!-- 方法面板 -->
+                <div id="panel-methods" class="h-full hidden flex flex-col">
+                    <div class="p-4 border-b border-gray-700 flex gap-3">
+                        <input type="text" id="methodSearch" placeholder="搜索方法..." class="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-primary" oninput="filterMethods()">
+                        <input type="text" id="methodClassFilter" placeholder="所属类..." class="w-40 bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-primary" oninput="filterMethods()">
+                    </div>
+                    <div id="methodsList" class="flex-1 overflow-auto scrollbar-thin p-4 space-y-2">
+                        <!-- 动态填充 -->
+                    </div>
+                    <div id="methodsPagination" class="p-3 border-t border-gray-700 bg-gray-800">
+                        <!-- 分页控件动态填充 -->
+                    </div>
+                </div>
+
+                <!-- 业务分析面板 -->
+                <div id="panel-business" class="h-full hidden flex flex-col">
+                    <div class="p-4 border-b border-gray-700 flex items-center justify-between">
+                        <h2 class="text-lg font-semibold">AI 深度业务分析</h2>
+                        <button onclick="runBusinessAnalysis()" id="btnAnalyzeBusiness" class="px-4 py-2 bg-gradient-to-r from-primary to-secondary hover:opacity-90 rounded-lg text-sm font-medium transition flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                            </svg>
+                            开始分析
+                        </button>
+                    </div>
+
+                    <!-- AI 配置信息 -->
+                    <div class="bg-gray-800 border-b border-gray-700 p-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="text-sm font-medium text-gray-300">LLM 配置</h3>
+                            <span id="llmStatusBadge" class="badge bg-gray-600 text-gray-300">检测中...</span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4 text-xs">
+                            <div>
+                                <span class="text-gray-500">端点:</span>
+                                <span id="llmBaseUrl" class="text-gray-300 ml-1">-</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-500">模型:</span>
+                                <span id="llmModel" class="text-gray-300 ml-1">-</span>
+                            </div>
+                            <div class="col-span-2">
+                                <span class="text-gray-500">API Key:</span>
+                                <span id="llmApiKey" class="text-gray-300 ml-1 font-mono">-</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="businessContent" class="flex-1 overflow-auto scrollbar-thin p-6">
+                        <div class="text-center text-gray-500 py-20">
+                            <svg class="w-16 h-16 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+                            </svg>
+                            <p class="text-lg">点击右上角按钮开始深度分析</p>
+                            <p class="text-sm mt-2">AI 将分析代码结构，识别业务逻辑、技术债务和重构机会</p>
+                            <p class="text-sm mt-4 text-accent">请先在 .env 文件中配置 LLM API 密钥</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 深度分析面板 -->
+                <div id="panel-deep-analysis" class="h-full hidden flex flex-col">
+                    <div class="p-4 border-b border-gray-700 bg-gray-800">
+                        <h2 class="text-lg font-semibold">方法/类深度分析</h2>
+                        <p class="text-xs text-gray-400 mt-0.5">智能上下文感知 · 本地缓存复用 · 支持人工纠正</p>
+                    </div>
+                    <div class="flex-1 flex overflow-hidden">
+                        <!-- 左侧：已分析列表 + 搜索 -->
+                        <div class="w-80 border-r border-gray-700 flex flex-col bg-gray-800/30">
+                            <div class="p-3 border-b border-gray-700">
+                                <div class="flex gap-2 mb-3">
+                                    <input type="text" id="deepSearchInput" placeholder="搜索类/方法..." class="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary">
+                                    <button onclick="deepSearch()" class="px-3 py-2 bg-primary hover:bg-primary/80 rounded-lg text-sm transition">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                                <div class="flex gap-2">
+                                    <button onclick="switchDeepSubTab('analyzed')" id="deepTab-analyzed" class="flex-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary text-white transition">已分析</button>
+                                    <button onclick="switchDeepSubTab('classes')" id="deepTab-classes" class="flex-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-700 hover:bg-gray-600 transition">全部类</button>
+                                    <button onclick="switchDeepSubTab('methods')" id="deepTab-methods" class="flex-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-700 hover:bg-gray-600 transition">全部方法</button>
+                                </div>
+                            </div>
+                            <div id="deepList" class="flex-1 overflow-auto scrollbar-thin p-2 space-y-1">
+                                <!-- 列表动态填充 -->
+                            </div>
+                            <div id="deepListPagination" class="p-2 border-t border-gray-700 bg-gray-800">
+                                <!-- 分页控件动态填充 -->
+                            </div>
+                        </div>
+                        <!-- 右侧：分析详情 -->
+                        <div class="flex-1 overflow-auto scrollbar-thin p-4" id="deepAnalysisDetail">
+                            <div class="text-center text-gray-500 py-20">
+                                <svg class="w-16 h-16 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                                </svg>
+                                <p class="text-lg">从左侧选择一个类或方法进行深度分析</p>
+                                <p class="text-sm mt-2 text-gray-400">AI 将自动收集相关上下文进行结构化分析</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 代码浏览面板 -->
+                <div id="panel-code" class="h-full hidden flex flex-col">
+                    <div class="p-4 border-b border-gray-700 bg-gray-800">
+                        <div id="codeBreadcrumb" class="text-sm text-gray-400">未选择文件</div>
+                    </div>
+                    <div id="codeContent" class="flex-1 overflow-auto bg-gray-900 p-4 code-font text-sm">
+                        <div class="text-gray-500 text-center py-20">在核心模块列表点击文件查看代码</div>
+                    </div>
+                </div>
+
+                <!-- AI 对话面板 -->
+                <div id="panel-chat" class="h-full hidden flex flex-col">
+                    <div class="p-4 border-b border-gray-700 bg-gray-800 flex items-center justify-between">
+                        <div>
+                            <h2 class="text-lg font-semibold">AI 代码对话</h2>
+                            <p class="text-xs text-gray-400 mt-0.5">基于 RAG 检索 + 手动注入代码 · Token 最小化策略</p>
+                        </div>
+                        <div id="chatTokenStats" class="text-xs text-gray-500 text-right hidden">
+                            <div>Prompt: <span id="statPromptTokens">-</span></div>
+                            <div>Completion: <span id="statCompletionTokens">-</span></div>
+                        </div>
+                    </div>
+                    <!-- 强制注入的代码区 -->
+                    <div id="forcedContextPanel" class="bg-primary/10 border-b border-primary/30 px-4 py-2 hidden">
+                        <div class="flex items-center justify-between">
+                            <div class="text-xs font-medium text-primary flex items-center gap-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/>
+                                </svg>
+                                强制注入 <span id="forcedCount" class="font-bold">0</span> 个代码片段（不受 RAG 检索影响）
+                            </div>
+                            <button onclick="clearForcedContext()" class="text-xs text-gray-400 hover:text-white transition">清空所有</button>
+                        </div>
+                        <div id="forcedContextList" class="flex flex-wrap gap-2 mt-2"></div>
+                    </div>
+                    <!-- 对话消息区 -->
+                    <div id="chatMessages" class="flex-1 overflow-auto scrollbar-thin p-4 space-y-4">
+                        <div class="text-center text-gray-500 py-10">
+                            <svg class="w-16 h-16 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+                            </svg>
+                            <p class="text-lg">开始与 AI 对话探索代码</p>
+                            <p class="text-sm mt-2">支持问题示例：</p>
+                            <div class="mt-3 space-y-2 max-w-md mx-auto">
+                                <button onclick="sendExampleQuestion('这个项目的核心功能是什么？')" class="block w-full text-left px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm transition border border-gray-700">
+                                    💡 这个项目的核心功能是什么？
+                                </button>
+                                <button onclick="sendExampleQuestion('分析 DbConnection 类的设计')" class="block w-full text-left px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm transition border border-gray-700">
+                                    🔍 分析 DbConnection 类的设计
+                                </button>
+                                <button onclick="sendExampleQuestion('找出项目中可能存在的 bug')" class="block w-full text-left px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm transition border border-gray-700">
+                                    🐛 找出项目中可能存在的 bug
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- 检索到的代码片段展示区 -->
+                    <div id="retrievedSnippets" class="bg-gray-800/50 border-t border-gray-700 p-3 hidden">
+                        <div class="text-xs text-gray-400 mb-2 flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                            </svg>
+                            检索到的代码片段
+                        </div>
+                        <div id="snippetsList" class="space-y-2 max-h-32 overflow-auto scrollbar-thin"></div>
+                    </div>
+                    <!-- 输入区 -->
+                    <div class="p-4 border-t border-gray-700 bg-gray-800">
+                        <div class="flex gap-3 mb-3">
+                            <button onclick="openAddCodeModal()" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm transition flex items-center gap-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/>
+                                </svg>
+                                手动添加代码
+                            </button>
+                            <span class="text-xs text-gray-400 flex items-center">手动指定的代码将 100% 发送给模型，不受检索分数影响</span>
+                        </div>
+                        <div class="flex gap-3">
+                            <input type="text" id="chatInput" placeholder="输入关于代码的问题..." class="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-primary" onkeydown="if(event.key==='Enter')sendChatMessage()">
+                            <button onclick="sendChatMessage()" id="sendChatBtn" class="px-6 py-3 bg-gradient-to-r from-primary to-secondary hover:opacity-90 rounded-lg font-medium transition flex items-center gap-2">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+                                </svg>
+                                发送
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- 手动添加代码弹窗 -->
+    <div id="addCodeModal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50">
+        <div class="bg-gray-800 rounded-xl p-6 w-full max-w-2xl border border-gray-700 shadow-xl mx-4 max-h-[80vh] flex flex-col">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-semibold">手动注入代码</h3>
+                <button onclick="closeAddCodeModal()" class="text-gray-400 hover:text-white">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="mb-4">
+                <input type="text" id="addCodeSearch" placeholder="搜索类或方法名称..." class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary" oninput="filterAddCodeList()">
+            </div>
+            <div class="flex gap-2 mb-3">
+                <button onclick="setAddCodeType('class')" id="addCodeType-class" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-primary text-white transition">类</button>
+                <button onclick="setAddCodeType('function')" id="addCodeType-function" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-700 hover:bg-gray-600 transition">方法</button>
+            </div>
+            <div id="addCodeList" class="flex-1 overflow-auto scrollbar-thin space-y-2 min-h-[300px]">
+                <!-- 动态填充 -->
+            </div>
+        </div>
+    </div>
+
+    <!-- 新增项目弹窗 -->
+    <div id="newProjectModal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50">
+        <div class="bg-gray-800 rounded-xl p-6 w-full max-w-md border border-gray-700 shadow-xl mx-4">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-semibold">分析新项目</h3>
+                <button onclick="closeNewProjectModal()" class="text-gray-400 hover:text-white">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">项目路径</label>
+                    <input type="text" id="newProjectPath" placeholder="例如: D:\Projects\my-app" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">项目名称 (可选，留空则使用目录名)</label>
+                    <input type="text" id="newProjectName" placeholder="例如: MyApp" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary">
+                </div>
+            </div>
+            <div class="flex items-center justify-end gap-3 mt-6">
+                <button onclick="closeNewProjectModal()" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm transition">取消</button>
+                <button onclick="startNewProjectAnalysis()" id="startAnalysisBtn" class="px-4 py-2 bg-gradient-to-r from-primary to-secondary hover:opacity-90 rounded-lg text-sm font-medium transition flex items-center gap-2">
+                    开始分析
+                </button>
+            </div>
+            <div id="analysisProgress" class="hidden mt-4">
+                <div class="text-sm text-gray-400 mb-2">分析中，请稍候...</div>
+                <div class="w-full bg-gray-700 rounded-full h-2">
+                    <div class="bg-primary h-2 rounded-full animate-pulse" style="width: 100%"></div>
+                </div>
+            </div>
+            <div id="analysisError" class="hidden mt-4 text-sm text-red-400"></div>
+        </div>
+    </div>
+    <script>
+        let currentProject = null;
+        let currentTab = 'overview';
+        let callChart = null;
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', async () => {
+            await loadProjects();
+
+            // 绑定搜索事件
+            document.getElementById('classSearch').addEventListener('input', debounce(filterClasses, 300));
+            document.getElementById('methodSearch').addEventListener('input', debounce(filterMethods, 300));
+            document.getElementById('methodClassFilter').addEventListener('input', debounce(filterMethods, 300));
+            document.getElementById('callgraphSearch').addEventListener('input', debounce(refreshCallGraph, 500));
+        });
+
+
+        // 弹窗控制
+        function openNewProjectModal() {
+            document.getElementById('newProjectModal').classList.remove('hidden');
+            document.getElementById('newProjectModal').classList.add('flex');
+        }
+
+        function closeNewProjectModal() {
+            document.getElementById('newProjectModal').classList.add('hidden');
+            document.getElementById('newProjectModal').classList.remove('flex');
+            document.getElementById('analysisProgress').classList.add('hidden');
+            document.getElementById('analysisError').classList.add('hidden');
+            document.getElementById('startAnalysisBtn').disabled = false;
+        }
+
+        // 启动新项目分析
+        async function startNewProjectAnalysis() {
+            const projectPath = document.getElementById('newProjectPath').value.trim();
+            const projectName = document.getElementById('newProjectName').value.trim();
+
+            if (!projectPath) {
+                alert('请输入项目路径');
+                return;
+            }
+
+            document.getElementById('analysisProgress').classList.remove('hidden');
+            document.getElementById('analysisError').classList.add('hidden');
+            document.getElementById('startAnalysisBtn').disabled = true;
+
+            try {
+                const res = await fetch('/api/analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        project_path: projectPath,
+                        project_name: projectName
+                    })
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || '分析失败');
+                }
+
+                const result = await res.json();
+                alert('分析成功！已解析 ' + result.modules_count + ' 个文件');
+                closeNewProjectModal();
+                await loadProjects();
+                // 自动选择新项目
+                const selector = document.getElementById('projectSelector');
+                selector.value = result.project_name;
+                loadProject(result.project_name);
+            } catch (e) {
+                document.getElementById('analysisError').textContent = e.message;
+                document.getElementById('analysisError').classList.remove('hidden');
+                document.getElementById('startAnalysisBtn').disabled = false;
+            } finally {
+                document.getElementById('analysisProgress').classList.add('hidden');
+            }
+        }
+
+        // 防抖函数
+        function debounce(func, wait) {
+            let timeout;
+            return function(...args) {
+                clearTimeout(timeout);
+                timeout = setTimeout(() => func.apply(this, args), wait);
+            };
+        }
+
+        // 加载项目列表
+        async function loadProjects() {
+            const res = await fetch('/api/projects');
+            const projects = await res.json();
+            const selector = document.getElementById('projectSelector');
+
+            selector.innerHTML = '<option value="">选择项目...</option>';
+            projects.forEach(p => {
+                const opt = document.createElement('option');
+                opt.value = p.name;
+                opt.textContent = `${p.name} (${p.file_count} files, ${p.line_count.toLocaleString()} lines)`;
+                selector.appendChild(opt);
+            });
+
+            selector.addEventListener('change', (e) => {
+                if (e.target.value) {
+                    loadProject(e.target.value);
+                }
+            });
+
+            // 自动选择第一个项目
+            if (projects.length > 0) {
+                selector.value = projects[0].name;
+                loadProject(projects[0].name);
+            }
+            // 加载配置信息
+            loadConfig();
+        }
+
+        // 加载项目
+        async function loadProject(projectName) {
+            currentProject = projectName;
+            // 清除手动注入代码的缓存，切换项目时需要重新加载
+            window.allClasses = null;
+            window.allMethods = null;
+            updateStatus('加载中...', 'warning');
+
+            // 启用/禁用重新分析按钮
+            const btnReanalyze = document.getElementById('btnReanalyze');
+            if (projectName) {
+                btnReanalyze.disabled = false;
+                btnReanalyze.title = '重新分析当前项目';
+            } else {
+                btnReanalyze.disabled = true;
+                btnReanalyze.title = '请先选择项目';
+            }
+
+            try {
+                // 只加载概览，类和方法在进入对应页面时懒加载
+                await loadOverview();
+
+                updateStatus('已就绪', 'success');
+
+                // 根据当前标签页懒加载数据
+                if (currentTab === 'callgraph') {
+                    await refreshCallGraph();
+                } else if (currentTab === 'classes') {
+                    await loadClasses(1);
+                } else if (currentTab === 'methods') {
+                    await loadMethods(1);
+                } else if (currentTab === 'business') {
+                    await runBusinessAnalysis(false);
+                } else if (currentTab === 'deep-analysis') {
+                    await loadDeepAnalysisList();
+                }
+            } catch (e) {
+                updateStatus('加载失败', 'danger');
+                console.error(e);
+            }
+        }
+
+        // 更新状态指示器
+        function updateStatus(text, color) {
+            const indicator = document.getElementById('statusIndicator');
+            const colors = {
+                success: 'bg-green-500',
+                warning: 'bg-yellow-500',
+                danger: 'bg-red-500',
+                neutral: 'bg-gray-500'
+            };
+            indicator.innerHTML = `<span class="w-2 h-2 ${colors[color] || colors.neutral} rounded-full"></span>${text}`;
+        }
+
+        // 切换标签
+        async function switchTab(tab) {
+            // 隐藏所有面板
+            ['overview', 'callgraph', 'classes', 'methods', 'business', 'deep-analysis', 'code', 'chat'].forEach(t => {
+                document.getElementById(`panel-${t}`).classList.add('hidden');
+                document.getElementById(`tab-${t}`).classList.remove('tab-active');
+            });
+
+            // 显示选中面板
+            document.getElementById(`panel-${tab}`).classList.remove('hidden');
+            document.getElementById(`tab-${tab}`).classList.add('tab-active');
+            currentTab = tab;
+
+            if (tab === 'callgraph' && currentProject) {
+                await refreshCallGraph();
+            }
+            if (tab === 'classes' && currentProject) {
+                await loadClasses(1);
+            }
+            if (tab === 'methods' && currentProject) {
+                await loadMethods(1);
+            }
+            if (tab === 'business' && currentProject) {
+                // 尝试加载缓存结果，不强制重新分析
+                await runBusinessAnalysis(false);
+            }
+            if (tab === 'deep-analysis' && currentProject) {
+                await loadDeepAnalysisList();
+            }
+        }
+
+        // 加载概览
+        async function loadOverview() {
+            const res = await fetch(`/api/${currentProject}/overview`);
+            const data = await res.json();
+
+            document.getElementById('statFiles').textContent = data.module_count;
+            document.getElementById('statClasses').textContent = data.class_count;
+            document.getElementById('statMethods').textContent = data.function_count;
+
+            // 计算复杂度等级
+            const complexity = Math.min(5, Math.floor(Math.log10(data.function_count) * 1.2));
+            const levels = ['⭐ 简单', '⭐⭐ 中等', '⭐⭐⭐ 复杂', '⭐⭐⭐⭐ 非常复杂', '⭐⭐⭐⭐⭐ 极端复杂'];
+            document.getElementById('statLevel').textContent = levels[complexity];
+
+            // 渲染核心模块
+            const modulesList = document.getElementById('topModulesList');
+            modulesList.innerHTML = data.top_modules.map(m => `
+                <div class="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg hover:bg-gray-700 cursor-pointer transition" onclick="viewCode('${m.relative_path.replace(/\\/g, '/')}')">
+                    <div>
+                        <div class="font-medium text-sm">${m.relative_path}</div>
+                        <div class="text-xs text-gray-400 mt-0.5">${m.class_count} 个类, ${m.func_count} 个方法</div>
+                    </div>
+                    <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                    </svg>
+                </div>
+            `).join('');
+        }
+
+        // 类列表分页状态
+        window.classListState = { page: 1, pageSize: 50, search: '', total: 0, totalPages: 0 };
+
+        // 加载类列表（分页）
+        async function loadClasses(page = 1) {
+            if (!currentProject) return;
+
+            const search = document.getElementById('classSearch').value;
+            window.classListState.page = page;
+            window.classListState.search = search;
+
+            const res = await fetch(`/api/${currentProject}/classes?search=${encodeURIComponent(search)}&page=${page}&page_size=${window.classListState.pageSize}`);
+            const data = await res.json();
+
+            window.classListState.total = data.total;
+            window.classListState.totalPages = data.total_pages;
+
+            renderClassesList(data.items);
+            renderClassesPagination();
+        }
+
+        function filterClasses() {
+            // 搜索变化时重置到第一页
+            loadClasses(1);
+        }
+
+        function renderClassesList(classes) {
+            const list = document.getElementById('classesList');
+            list.innerHTML = classes.map(c => `
+                <div class="flex items-center justify-between p-3 bg-gray-800 rounded-lg hover:bg-gray-700 cursor-pointer transition border border-gray-700" onclick="viewCode('${c.file_path.replace(/\\/g, '/')}')">
+                    <div>
+                        <div class="font-medium text-accent">${c.name}</div>
+                        <div class="text-xs text-gray-400 mt-0.5">${c.file_path}:${c.start_line} · ${c.method_count} 个方法</div>
+                    </div>
+                    <span class="badge bg-gray-700 text-gray-300">${c.method_count} 方法</span>
+                </div>
+            `).join('');
+        }
+
+        function renderClassesPagination() {
+            const s = window.classListState;
+            let pages = [];
+            for (let i = Math.max(1, s.page - 2); i <= Math.min(s.totalPages, s.page + 2); i++) {
+                pages.push(i);
+            }
+
+            const pagination = document.getElementById('classesPagination');
+            pagination.innerHTML = `
+                <div class="flex items-center justify-between text-sm">
+                    <div class="text-gray-400">共 ${s.total} 个类 · 第 ${s.page}/${s.totalPages} 页</div>
+                    <div class="flex gap-1">
+                        <button onclick="loadClasses(1)" class="px-2 py-1 rounded ${s.page === 1 ? 'bg-gray-700 text-gray-500 cursor-not-allowed' : 'bg-primary hover:bg-primary/80 text-white'} transition" ${s.page === 1 ? 'disabled' : ''}>首页</button>
+                        <button onclick="loadClasses(${s.page - 1})" class="px-2 py-1 rounded ${s.page === 1 ? 'bg-gray-700 text-gray-500 cursor-not-allowed' : 'bg-gray-600 hover:bg-gray-500 text-white'} transition" ${s.page === 1 ? 'disabled' : ''}>上一页</button>
+                        ${pages.map(p => `
+                            <button onclick="loadClasses(${p})" class="px-2 py-1 rounded ${p === s.page ? 'bg-primary text-white' : 'bg-gray-600 hover:bg-gray-500 text-white'} transition">${p}</button>
+                        `).join('')}
+                        <button onclick="loadClasses(${s.page + 1})" class="px-2 py-1 rounded ${s.page >= s.totalPages ? 'bg-gray-700 text-gray-500 cursor-not-allowed' : 'bg-gray-600 hover:bg-gray-500 text-white'} transition" ${s.page >= s.totalPages ? 'disabled' : ''}>下一页</button>
+                        <button onclick="loadClasses(${s.totalPages})" class="px-2 py-1 rounded ${s.page >= s.totalPages ? 'bg-gray-700 text-gray-500 cursor-not-allowed' : 'bg-primary hover:bg-primary/80 text-white'} transition" ${s.page >= s.totalPages ? 'disabled' : ''}>末页</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 方法列表分页状态
+        window.methodListState = { page: 1, pageSize: 100, search: '', classFilter: '', total: 0, totalPages: 0 };
+
+        // 加载方法列表（分页）
+        async function loadMethods(page = 1) {
+            if (!currentProject) return;
+
+            const search = document.getElementById('methodSearch').value;
+            const classFilter = document.getElementById('methodClassFilter').value;
+            window.methodListState.page = page;
+            window.methodListState.search = search;
+            window.methodListState.classFilter = classFilter;
+
+            const res = await fetch(`/api/${currentProject}/methods?search=${encodeURIComponent(search)}&class_name=${encodeURIComponent(classFilter)}&page=${page}&page_size=${window.methodListState.pageSize}`);
+            const data = await res.json();
+
+            window.methodListState.total = data.total;
+            window.methodListState.totalPages = data.total_pages;
+
+            renderMethodsList(data.items);
+            renderMethodsPagination();
+        }
+
+        function filterMethods() {
+            // 搜索变化时重置到第一页
+            loadMethods(1);
+        }
+
+        function renderMethodsList(methods) {
+            const list = document.getElementById('methodsList');
+            list.innerHTML = methods.map(m => `
+                <div class="flex items-center justify-between p-3 bg-gray-800 rounded-lg hover:bg-gray-700 cursor-pointer transition border border-gray-700" onclick="viewCode('${m.file_path.replace(/\\/g, '/')}')">
+                    <div>
+                        <div class="font-medium text-primary">${m.class_name ? m.class_name + '.' : ''}${m.name}</div>
+                        <div class="text-xs text-gray-400 mt-0.5">${m.file_path}:${m.start_line}</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function renderMethodsPagination() {
+            const s = window.methodListState;
+            let pages = [];
+            for (let i = Math.max(1, s.page - 2); i <= Math.min(s.totalPages, s.page + 2); i++) {
+                pages.push(i);
+            }
+
+            const pagination = document.getElementById('methodsPagination');
+            pagination.innerHTML = `
+                <div class="flex items-center justify-between text-sm">
+                    <div class="text-gray-400">共 ${s.total} 个方法 · 第 ${s.page}/${s.totalPages} 页</div>
+                    <div class="flex gap-1">
+                        <button onclick="loadMethods(1)" class="px-2 py-1 rounded ${s.page === 1 ? 'bg-gray-700 text-gray-500 cursor-not-allowed' : 'bg-primary hover:bg-primary/80 text-white'} transition" ${s.page === 1 ? 'disabled' : ''}>首页</button>
+                        <button onclick="loadMethods(${s.page - 1})" class="px-2 py-1 rounded ${s.page === 1 ? 'bg-gray-700 text-gray-500 cursor-not-allowed' : 'bg-gray-600 hover:bg-gray-500 text-white'} transition" ${s.page === 1 ? 'disabled' : ''}>上一页</button>
+                        ${pages.map(p => `
+                            <button onclick="loadMethods(${p})" class="px-2 py-1 rounded ${p === s.page ? 'bg-primary text-white' : 'bg-gray-600 hover:bg-gray-500 text-white'} transition">${p}</button>
+                        `).join('')}
+                        <button onclick="loadMethods(${s.page + 1})" class="px-2 py-1 rounded ${s.page >= s.totalPages ? 'bg-gray-700 text-gray-500 cursor-not-allowed' : 'bg-gray-600 hover:bg-gray-500 text-white'} transition" ${s.page >= s.totalPages ? 'disabled' : ''}>下一页</button>
+                        <button onclick="loadMethods(${s.totalPages})" class="px-2 py-1 rounded ${s.page >= s.totalPages ? 'bg-gray-700 text-gray-500 cursor-not-allowed' : 'bg-primary hover:bg-primary/80 text-white'} transition" ${s.page >= s.totalPages ? 'disabled' : ''}>末页</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 刷新调用图
+        async function refreshCallGraph() {
+            if (!currentProject) return;
+
+            const filter = document.getElementById('callgraphSearch').value;
+            const res = await fetch(`/api/${currentProject}/callgraph?method_filter=${filter}`);
+            const data = await res.json();
+
+            if (!data.nodes || data.nodes.length === 0) {
+                console.log('No call graph data');
+                return;
+            }
+
+            if (!callChart) {
+                callChart = echarts.init(document.getElementById('callgraphChart'));
+                window.addEventListener('resize', () => callChart.resize());
+            }
+
+            const nodes = data.nodes.map((n, i) => ({
+                id: n,
+                name: n,
+                symbolSize: Math.min(50, 15 + n.length * 1.5),
+                itemStyle: {
+                    color: n.includes(filter) ? '#F59E0B' : '#4F46E5'
+                }
+            }));
+
+            const edges = data.edges.map(e => ({
+                source: e.source,
+                target: e.target,
+                lineStyle: {
+                    color: '#374151',
+                    width: 1,
+                    curveness: 0.2
+                }
+            }));
+
+            callChart.setOption({
+                tooltip: {},
+                animation: true,
+                series: [{
+                    type: 'graph',
+                    layout: 'force',
+                    roam: true,
+                    draggable: true,
+                    data: nodes,
+                    edges: edges,
+                    emphasis: {
+                        focus: 'adjacency',
+                        lineStyle: {
+                            width: 3,
+                            color: '#F59E0B'
+                        }
+                    },
+                    force: {
+                        repulsion: 150,
+                        edgeLength: 60,
+                        gravity: 0.05
+                    },
+                    label: {
+                        show: true,
+                        position: 'right',
+                        fontSize: 10,
+                        color: '#9CA3AF'
+                    }
+                }]
+            });
+        }
+
+        // 加载缓存的业务分析结果
+        async function loadCachedBusinessAnalysis() {
+            if (!currentProject) return;
+
+            const content = document.getElementById('businessContent');
+
+            try {
+                const res = await fetch(`/api/${currentProject}/analyze/business`);
+                if (res.ok) {
+                    const result = await res.json();
+                    displayAnalysisResult(result);
+                    return true;
+                }
+            } catch (e) {
+                // 缓存不存在，显示初始页面
+            }
+            return false;
+        }
+
+        // 显示分析结果
+        function displayAnalysisResult(result) {
+            const content = document.getElementById('businessContent');
+            const cachedInfo = result.cached_at ? `<span class="text-xs text-gray-500 ml-2">缓存于: ${new Date(result.cached_at).toLocaleString()}</span>` : '';
+
+            content.innerHTML = `
+                <div class="prose prose-invert max-w-none">
+                    <div class="bg-gray-800 rounded-xl p-6 border border-gray-700 whitespace-pre-wrap font-sans leading-relaxed">
+${result.analysis}
+                    </div>
+                    <div class="mt-4 text-sm text-gray-500 text-right flex items-center justify-end gap-2">
+                        基于 ${result.code_samples_count} 个代码样本分析
+                        ${cachedInfo}
+                    </div>
+                </div>
+            `;
+        }
+
+        // 运行业务分析
+        async function runBusinessAnalysis(force = false) {
+            if (!currentProject) return;
+
+            // 如果不是强制重新分析，先尝试加载缓存
+            if (!force) {
+                const hasCache = await loadCachedBusinessAnalysis();
+                if (hasCache) return;
+            }
+
+            const btn = document.getElementById('btnAnalyzeBusiness');
+            const content = document.getElementById('businessContent');
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="animate-spin">⏳</span> 分析中...';
+
+            content.innerHTML = `
+                <div class="text-center py-20">
+                    <div class="text-4xl mb-4 animate-pulse">🔍</div>
+                    <p class="text-lg text-gray-300">AI 正在深度分析代码...</p>
+                    <p class="text-sm text-gray-500 mt-2">正在梳理业务逻辑、识别技术债务、生成重构建议</p>
+                </div>
+            `;
+
+            try {
+                const res = await fetch(`/api/${currentProject}/analyze/business`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ project_name: currentProject, force: true })
+                });
+
+                if (!res.ok) {
+                    const error = await res.text();
+                    throw new Error(error);
+                }
+
+                const result = await res.json();
+                displayAnalysisResult(result);
+            } catch (e) {
+                content.innerHTML = `
+                    <div class="text-center py-20 text-red-400">
+                        <p class="font-semibold mb-2">分析失败</p>
+                        <p class="text-sm">${e.message}</p>
+                        <p class="text-sm mt-4 text-yellow-400">请检查 .env 文件中的 LLM API 配置</p>
+                    </div>
+                `;
+            }
+
+            btn.disabled = false;
+            btn.innerHTML = `
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                </svg>
+                重新分析
+            `;
+        }
+
+        // 查看代码
+        async function viewCode(filePath) {
+            switchTab('code');
+            document.getElementById('codeBreadcrumb').textContent = filePath;
+            document.getElementById('codeContent').innerHTML = '<div class="text-center py-10 text-gray-500">加载中...</div>';
+
+            // 规范化路径：处理 Windows 反斜杠转换为正斜杠，并进行 URL 编码
+            const normalizedPath = filePath.replace(/\\/g, '/');
+            const encodedPath = encodeURIComponent(normalizedPath).replace(/%2F/g, '/');
+
+            // 根据文件扩展名判断语言
+            const ext = filePath.split('.').pop().toLowerCase();
+            const langMap = {
+                'js': 'javascript', 'jsx': 'javascript',
+                'ts': 'typescript', 'tsx': 'typescript',
+                'py': 'python', 'java': 'java',
+                'cs': 'csharp', 'css': 'css',
+                'html': 'xml', 'htm': 'xml',
+                'xml': 'xml', 'json': 'json'
+            };
+            const language = langMap[ext] || 'plaintext';
+
+            try {
+                const res = await fetch(`/api/${currentProject}/code/${encodedPath}`);
+                if (!res.ok) {
+                    throw new Error(await res.text());
+                }
+                const data = await res.json();
+
+                if (!data.lines || !Array.isArray(data.lines)) {
+                    throw new Error('Invalid data format');
+                }
+
+                // 合并所有代码进行高亮，然后按行拆分
+                const fullCode = data.lines.map(l => l.code).join('\n');
+                let highlighted = fullCode;
+
+                // 使用 highlight.js 进行代码高亮
+                if (window.hljs && hljs.highlight) {
+                    try {
+                        highlighted = hljs.highlight(fullCode, { language: language }).value;
+                    } catch (e) {
+                        highlighted = escapeHtml(fullCode);
+                    }
+                } else {
+                    highlighted = escapeHtml(fullCode);
+                }
+
+                // 将高亮后的代码按行拆分并添加行号
+                const highlightedLines = highlighted.split('\n');
+                document.getElementById('codeContent').innerHTML = highlightedLines.map((line, index) => `
+                    <div class="flex">
+                        <span class="w-12 text-right pr-4 text-gray-600 select-none shrink-0">${index + 1}</span>
+                        <code class="flex-1 hljs whitespace-pre break-all text-sm" style="background: transparent;">${line || ' '}</code>
+                    </div>
+                `).join('');
+            } catch (e) {
+                document.getElementById('codeContent').innerHTML = `<div class="text-red-400 p-4">无法加载代码: ${e.message}</div>`;
+            }
+        }
+
+        // 加载配置信息
+        async function loadConfig() {
+            try {
+                const res = await fetch('/api/config');
+                const config = await res.json();
+
+                document.getElementById('llmBaseUrl').textContent = config.base_url || '-';
+                document.getElementById('llmModel').textContent = config.model || '-';
+                document.getElementById('llmApiKey').textContent = config.api_key || '-';
+
+                const badge = document.getElementById('llmStatusBadge');
+                if (config.llm_enabled) {
+                    badge.textContent = '✓ 已启用';
+                    badge.className = 'badge bg-green-900/50 text-green-400';
+                } else {
+                    badge.textContent = '✗ 未配置';
+                    badge.className = 'badge bg-red-900/50 text-red-400';
+                }
+            } catch (e) {
+                console.error('Failed to load config:', e);
+            }
+        }
+
+        function escapeHtml(text) {
+            if (text === null || text === undefined) return '';
+            const div = document.createElement('div');
+            div.textContent = String(text);
+            return div.innerHTML;
+        }
+
+        // ========== 聊天功能 ==========
+        let chatHistory = [];
+
+        function sendExampleQuestion(question) {
+            document.getElementById('chatInput').value = question;
+            sendChatMessage();
+        }
+
+        async function sendChatMessage() {
+            if (!currentProject) {
+                alert('请先选择一个项目');
+                return;
+            }
+
+            const input = document.getElementById('chatInput');
+            const message = input.value.trim();
+            if (!message) return;
+
+            input.value = '';
+            input.disabled = true;
+            document.getElementById('sendChatBtn').disabled = true;
+
+            // 添加用户消息
+            addChatMessage('user', message);
+
+            // 添加 AI 正在输入状态
+            const loadingId = addLoadingMessage();
+
+            try {
+                const res = await fetch(`/api/${currentProject}/chat`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        project_name: currentProject,
+                        message: message,
+                        history: chatHistory,
+                        forced_context: forcedContextItems  // 强制注入的代码
+                    })
+                });
+
+                if (!res.ok) {
+                    const error = await res.json();
+                    throw new Error(error.detail || '对话失败');
+                }
+
+                const result = await res.json();
+
+                // 移除加载状态
+                removeLoadingMessage(loadingId);
+
+                // 添加 AI 回复
+                addChatMessage('assistant', result.answer);
+
+                // 显示检索到的代码片段
+                showRetrievedSnippets(result.context_used.snippets);
+
+                // 更新 token 统计
+                document.getElementById('chatTokenStats').classList.remove('hidden');
+                document.getElementById('statPromptTokens').textContent = result.context_used.prompt_tokens || '-';
+                document.getElementById('statCompletionTokens').textContent = result.context_used.completion_tokens || '-';
+
+                // 保存到历史
+                chatHistory.push({ role: 'user', content: message });
+                chatHistory.push({ role: 'assistant', content: result.answer });
+
+            } catch (e) {
+                removeLoadingMessage(loadingId);
+                addChatMessage('assistant', `❌ 错误: ${e.message}`);
+            }
+
+            input.disabled = false;
+            document.getElementById('sendChatBtn').disabled = false;
+            input.focus();
+        }
+
+        function addChatMessage(role, content) {
+            const messagesDiv = document.getElementById('chatMessages');
+            const isUser = role === 'user';
+
+            // 移除欢迎信息
+            const welcome = messagesDiv.querySelector('.text-center.text-gray-500.py-10');
+            if (welcome) welcome.remove();
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `flex ${isUser ? 'justify-end' : 'justify-start'}`;
+
+            const avatar = isUser
+                ? '<div class="w-8 h-8 bg-primary rounded-full flex items-center justify-center text-sm font-bold mr-2">你</div>'
+                : '<div class="w-8 h-8 bg-secondary rounded-full flex items-center justify-center text-sm font-bold mr-2">AI</div>';
+
+            const bubbleClass = isUser
+                ? 'bg-primary/20 border border-primary/30'
+                : 'bg-gray-700/50 border border-gray-600';
+
+            messageDiv.innerHTML = `
+                ${!isUser ? avatar : ''}
+                <div class="max-w-2xl ${bubbleClass} rounded-xl p-4 ${isUser ? 'order-1 ml-2' : ''}">
+                    <div class="prose prose-invert prose-sm max-w-none">
+                        <div class="whitespace-pre-wrap">${renderMarkdown(content)}</div>
+                    </div>
+                </div>
+                ${isUser ? avatar : ''}
+            `;
+
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function addLoadingMessage() {
+            const messagesDiv = document.getElementById('chatMessages');
+            const id = 'loading-' + Date.now();
+
+            const messageDiv = document.createElement('div');
+            messageDiv.id = id;
+            messageDiv.className = 'flex justify-start';
+            messageDiv.innerHTML = `
+                <div class="w-8 h-8 bg-secondary rounded-full flex items-center justify-center text-sm font-bold mr-2">AI</div>
+                <div class="bg-gray-700/50 border border-gray-600 rounded-xl p-4">
+                    <div class="flex items-center gap-2">
+                        <span class="animate-pulse">思考中</span>
+                        <span class="animate-bounce">.</span>
+                        <span class="animate-bounce" style="animation-delay: 0.2s">.</span>
+                        <span class="animate-bounce" style="animation-delay: 0.4s">.</span>
+                    </div>
+                </div>
+            `;
+
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            return id;
+        }
+
+        function removeLoadingMessage(id) {
+            const el = document.getElementById(id);
+            if (el) el.remove();
+        }
+
+        function showRetrievedSnippets(snippets) {
+            const container = document.getElementById('retrievedSnippets');
+            const list = document.getElementById('snippetsList');
+
+            if (!snippets || snippets.length === 0) {
+                container.classList.add('hidden');
+                return;
+            }
+
+            container.classList.remove('hidden');
+            list.innerHTML = snippets.map(s => `
+                <div class="bg-gray-700/50 rounded px-3 py-2 text-xs cursor-pointer hover:bg-gray-700 transition" onclick="viewCode('${s.file_path.replace(/\\/g, '/')}')">
+                    <div class="flex items-center justify-between">
+                        <span class="font-mono text-accent">${s.type}: ${s.name}</span>
+                        <span class="text-gray-500">相关性: ${s.relevance.toFixed(1)}</span>
+                    </div>
+                    <div class="text-gray-400 mt-0.5">${s.file_path}:${s.start_line}-${s.end_line}</div>
+                </div>
+            `).join('');
+        }
+
+        function renderMarkdown(text) {
+            // 简单的 Markdown 渲染
+            return escapeHtml(text)
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/`([^`]+)`/g, '<code class="bg-gray-800 px-1 rounded">$1</code>')
+                .replace(/\n/g, '<br>');
+        }
+
+        // 重新分析当前项目
+        async function reanalyzeProject() {
+            if (!currentProject) {
+                alert('请先选择一个项目');
+                return;
+            }
+
+            if (!confirm(`确定要重新分析 "${currentProject}" 项目吗？\n\n这将重新解析所有代码文件并重建索引，可能需要几分钟时间。`)) {
+                return;
+            }
+
+            const btn = document.getElementById('btnReanalyze');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="animate-spin">⏳</span> 分析中...';
+            updateStatus('分析中...', 'warning');
+
+            try {
+                // 从数据库获取项目路径
+                const response = await fetch('/api/projects');
+                const projects = await response.json();
+                const project = projects.find(p => p.name === currentProject);
+
+                if (!project || !project.path) {
+                    throw new Error('无法获取项目路径');
+                }
+
+                // 调用重新分析 API
+                const resp = await fetch('/api/analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        project_path: project.path,
+                        project_name: currentProject
+                    })
+                });
+
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    throw new Error(err.detail || '分析失败');
+                }
+
+                const result = await resp.json();
+                alert(`重新分析完成！\n\n文件: ${result.modules_count} 个\n调用图节点: ${result.nodes_count}\n调用图边: ${result.edges_count}`);
+
+                // 重新加载项目数据
+                await loadProject(currentProject);
+
+            } catch (e) {
+                alert(`重新分析失败: ${e.message}`);
+                console.error(e);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = `
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                    </svg>
+                    重新分析
+                `;
+            }
+        }
+
+        // ========== 聊天手动注入代码相关 ==========
+        let forcedContextItems = [];  // 强制注入的代码片段
+        let addCodeType = 'class';
+
+        function openAddCodeModal() {
+            document.getElementById('addCodeModal').classList.remove('hidden');
+            document.getElementById('addCodeModal').classList.add('flex');
+            document.getElementById('addCodeSearch').value = '';
+            filterAddCodeList();
+        }
+
+        function closeAddCodeModal() {
+            document.getElementById('addCodeModal').classList.add('hidden');
+            document.getElementById('addCodeModal').classList.remove('flex');
+        }
+
+        function setAddCodeType(type) {
+            addCodeType = type;
+            ['class', 'function'].forEach(t => {
+                const btn = document.getElementById(`addCodeType-${t}`);
+                if (t === type) {
+                    btn.className = 'px-3 py-1.5 rounded-lg text-xs font-medium bg-primary text-white transition';
+                } else {
+                    btn.className = 'px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-700 hover:bg-gray-600 transition';
+                }
+            });
+            filterAddCodeList();
+        }
+
+        // 防止并发加载
+        let isLoadingForAddCode = false;
+
+        async function loadAllForAddCode() {
+            if (isLoadingForAddCode) return;
+            if (!currentProject) return;
+
+            isLoadingForAddCode = true;
+            const listDiv = document.getElementById('addCodeList');
+            listDiv.innerHTML = '<div class="text-center text-gray-500 py-10">加载中...</div>';
+
+            try {
+                if (addCodeType === 'class') {
+                    // 一次性加载所有类用于搜索（使用较大的 page_size）
+                    const res = await fetch(`/api/${currentProject}/classes?search=&page=1&page_size=5000`);
+                    const data = await res.json();
+                    window.allClasses = data.items || [];
+                } else {
+                    // 一次性加载所有方法用于搜索
+                    const res = await fetch(`/api/${currentProject}/methods?search=&class_name=&page=1&page_size=10000`);
+                    const data = await res.json();
+                    window.allMethods = data.items || [];
+                }
+                // 加载完成后渲染列表
+                renderAddCodeList();
+            } catch (e) {
+                listDiv.innerHTML = `<div class="text-center text-red-400 py-10">加载失败: ${e.message}</div>`;
+            } finally {
+                isLoadingForAddCode = false;
+            }
+        }
+
+        function renderAddCodeList() {
+            const query = document.getElementById('addCodeSearch').value.toLowerCase();
+            const listDiv = document.getElementById('addCodeList');
+            let items = [];
+
+            if (addCodeType === 'class') {
+                if (!window.allClasses) {
+                    loadAllForAddCode();
+                    return;
+                }
+                items = window.allClasses.filter(c => c.name.toLowerCase().includes(query));
+                listDiv.innerHTML = items.slice(0, 100).map(item => {
+                    const isAdded = forcedContextItems.some(f => f.type === 'class' && f.name === item.name);
+                    return `
+                    <div class="flex items-center justify-between p-3 bg-gray-700 rounded-lg hover:bg-gray-600 transition ${isAdded ? 'opacity-50' : ''}">
+                        <div>
+                            <div class="font-medium text-accent">${item.name}</div>
+                            <div class="text-xs text-gray-400">${item.file_path} · ${item.method_count} 个方法</div>
+                        </div>
+                        ${isAdded
+                            ? '<span class="badge bg-success/20 text-success">已添加</span>'
+                            : `<button onclick="addForcedContext('class', '${item.name.replace(/'/g, "\\'")}', '${item.file_path.replace(/\\/g, '/')}')" class="px-3 py-1 bg-primary hover:bg-primary/80 rounded text-xs transition">添加</button>`
+                        }
+                    </div>
+                `}).join('');
+            } else {
+                if (!window.allMethods) {
+                    loadAllForAddCode();
+                    return;
+                }
+                items = window.allMethods.filter(m => {
+                    const displayName = m.class_name ? `${m.class_name}.${m.name}` : m.name;
+                    return displayName.toLowerCase().includes(query);
+                });
+                listDiv.innerHTML = items.slice(0, 100).map(item => {
+                    const displayName = item.class_name ? `${item.class_name}.${item.name}` : item.name;
+                    const isAdded = forcedContextItems.some(f => f.type === 'function' && f.name === displayName);
+                    return `
+                    <div class="flex items-center justify-between p-3 bg-gray-700 rounded-lg hover:bg-gray-600 transition ${isAdded ? 'opacity-50' : ''}">
+                        <div>
+                            <div class="font-medium text-sm">${displayName}</div>
+                            <div class="text-xs text-gray-400">${item.file_path}:${item.start_line}</div>
+                        </div>
+                        ${isAdded
+                            ? '<span class="badge bg-success/20 text-success">已添加</span>'
+                            : `<button onclick="addForcedContext('function', '${displayName.replace(/'/g, "\\'")}', '${item.file_path.replace(/\\/g, '/')}')" class="px-3 py-1 bg-primary hover:bg-primary/80 rounded text-xs transition">添加</button>`
+                        }
+                    </div>
+                `}).join('');
+            }
+        }
+
+        // 将原来的 filterAddCodeList 重命名为 renderAddCodeList，入口改为新的
+        function filterAddCodeList() {
+            renderAddCodeList();
+        }
+
+        function addForcedContext(type, name, filePath) {
+            // 检查是否已添加
+            if (forcedContextItems.some(f => f.type === type && f.name === name)) {
+                return;
+            }
+            forcedContextItems.push({ type, name, file_path: filePath });
+            updateForcedContextUI();
+            filterAddCodeList();  // 刷新列表状态
+        }
+
+        function removeForcedContext(index) {
+            forcedContextItems.splice(index, 1);
+            updateForcedContextUI();
+        }
+
+        function clearForcedContext() {
+            forcedContextItems = [];
+            updateForcedContextUI();
+        }
+
+        function updateForcedContextUI() {
+            const panel = document.getElementById('forcedContextPanel');
+            const countSpan = document.getElementById('forcedCount');
+            const listDiv = document.getElementById('forcedContextList');
+
+            if (forcedContextItems.length === 0) {
+                panel.classList.add('hidden');
+                return;
+            }
+
+            panel.classList.remove('hidden');
+            countSpan.textContent = forcedContextItems.length;
+
+            listDiv.innerHTML = forcedContextItems.map((item, index) => {
+                const typeColor = item.type === 'class' ? 'bg-secondary/20 text-secondary' : 'bg-accent/20 text-accent';
+                return `
+                <div class="flex items-center gap-2 bg-gray-700 px-3 py-1.5 rounded-lg text-sm">
+                    <span class="badge ${typeColor}">${item.type}</span>
+                    <span class="font-mono">${item.name}</span>
+                    <button onclick="removeForcedContext(${index})" class="text-gray-400 hover:text-white ml-1">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                    </button>
+                </div>
+                `}).join('');
+        }
+
+        // ========== 深度分析相关函数 ==========
+        let currentDeepSubTab = 'analyzed';
+        let currentDeepAnalysisTarget = null;
+        // 深度分析列表分页状态
+        window.deepListState = {
+            analyzed: { page: 1, pageSize: 50 },
+            classes: { page: 1, pageSize: 50 },
+            methods: { page: 1, pageSize: 80 }
+        };
+
+        function switchDeepSubTab(tab) {
+            currentDeepSubTab = tab;
+            ['analyzed', 'classes', 'methods'].forEach(t => {
+                const btn = document.getElementById(`deepTab-${t}`);
+                if (t === tab) {
+                    btn.className = 'flex-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary text-white transition';
+                } else {
+                    btn.className = 'flex-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-700 hover:bg-gray-600 transition';
+                }
+            });
+            // 切换标签时重置到第一页
+            window.deepListState[tab].page = 1;
+            loadDeepAnalysisList();
+        }
+
+        async function loadDeepAnalysisList(page = null) {
+            const listDiv = document.getElementById('deepList');
+            const paginationDiv = document.getElementById('deepListPagination');
+            const state = window.deepListState[currentDeepSubTab];
+            if (page !== null) state.page = page;
+
+            if (currentDeepSubTab === 'analyzed') {
+                // 已分析列表
+                try {
+                    const res = await fetch(`/api/${currentProject}/deep-analysis/list`);
+                    const items = await res.json();
+                    if (items.length === 0) {
+                        listDiv.innerHTML = '<div class="text-center text-gray-500 py-10 text-sm">暂无分析记录<br>点击"全部类"或"全部方法"开始分析</div>';
+                        paginationDiv.innerHTML = '';
+                        return;
+                    }
+                    // 已分析列表简单分页（数据量应该不大）
+                    const start = (state.page - 1) * state.pageSize;
+                    const end = start + state.pageSize;
+                    const pageItems = items.slice(start, end);
+
+                    listDiv.innerHTML = pageItems.map(item => `
+                        <div class="p-3 bg-gray-800 rounded-lg hover:bg-gray-700 cursor-pointer transition border border-gray-700"
+                             onclick="viewDeepAnalysis('${item.target_type}', '${item.target_name.replace(/'/g, "\\'")}', '${item.file_path.replace(/\\/g, '/')}')">
+                            <div class="flex items-center gap-2">
+                                <span class="badge ${item.target_type === 'class' ? 'bg-secondary/20 text-secondary' : 'bg-accent/20 text-accent'}">${item.target_type}</span>
+                                ${item.manually_corrected ? '<span class="badge bg-warning/20 text-warning">✏️ 已纠正</span>' : ''}
+                            </div>
+                            <div class="font-medium text-sm mt-1">${item.target_name}</div>
+                            <div class="text-xs text-gray-400 mt-0.5">${item.file_path}</div>
+                        </div>
+                    `).join('');
+
+                    // 渲染简单分页
+                    const totalPages = Math.ceil(items.length / state.pageSize);
+                    if (totalPages > 1) {
+                        paginationDiv.innerHTML = renderSimplePagination(state.page, totalPages, 'loadDeepAnalysisList');
+                    } else {
+                        paginationDiv.innerHTML = '';
+                    }
+                } catch (e) {
+                    listDiv.innerHTML = '<div class="text-center text-red-400 py-10 text-sm">加载失败</div>';
+                }
+            } else if (currentDeepSubTab === 'classes') {
+                // 全部类列表 - 使用分页 API
+                const search = document.getElementById('deepSearchInput').value;
+                const res = await fetch(`/api/${currentProject}/classes?search=${encodeURIComponent(search)}&page=${state.page}&page_size=${state.pageSize}`);
+                const data = await res.json();
+
+                listDiv.innerHTML = data.items.map(c => `
+                    <div class="p-3 bg-gray-800 rounded-lg hover:bg-gray-700 cursor-pointer transition border border-gray-700"
+                         onclick="startDeepAnalysis('class', '${c.name.replace(/'/g, "\\'")}', '${c.file_path.replace(/\\/g, '/')}')">
+                        <div class="font-medium text-accent">${c.name}</div>
+                        <div class="text-xs text-gray-400 mt-0.5">${c.method_count} 个方法 · ${c.file_path}</div>
+                    </div>
+                `).join('');
+
+                paginationDiv.innerHTML = renderSimplePagination(data.page, data.total_pages, 'loadDeepAnalysisList');
+            } else if (currentDeepSubTab === 'methods') {
+                // 全部方法列表 - 使用分页 API
+                const search = document.getElementById('deepSearchInput').value;
+                const res = await fetch(`/api/${currentProject}/methods?search=${encodeURIComponent(search)}&page=${state.page}&page_size=${state.pageSize}`);
+                const data = await res.json();
+
+                listDiv.innerHTML = data.items.map(m => {
+                    const displayName = m.class_name ? `${m.class_name}.${m.name}` : m.name;
+                    return `
+                    <div class="p-3 bg-gray-800 rounded-lg hover:bg-gray-700 cursor-pointer transition border border-gray-700"
+                         onclick="startDeepAnalysis('function', '${displayName.replace(/'/g, "\\'")}', '${m.file_path.replace(/\\/g, '/')}')">
+                        <div class="font-medium text-sm">${displayName}</div>
+                        <div class="text-xs text-gray-400 mt-0.5">${m.file_path}:${m.start_line}</div>
+                    </div>
+                `}).join('');
+
+                paginationDiv.innerHTML = renderSimplePagination(data.page, data.total_pages, 'loadDeepAnalysisList');
+            }
+        }
+
+        function renderSimplePagination(page, totalPages, callbackName) {
+            if (totalPages <= 1) return '';
+
+            let pages = [];
+            for (let i = Math.max(1, page - 2); i <= Math.min(totalPages, page + 2); i++) {
+                pages.push(i);
+            }
+
+            return `
+                <div class="flex items-center justify-center gap-1 text-xs">
+                    <button onclick="${callbackName}(1)" class="px-2 py-1 rounded ${page === 1 ? 'bg-gray-700 text-gray-500 cursor-not-allowed' : 'bg-primary hover:bg-primary/80 text-white'} transition" ${page === 1 ? 'disabled' : ''}>首页</button>
+                    ${pages.map(p => `
+                        <button onclick="${callbackName}(${p})" class="px-2 py-1 rounded ${p === page ? 'bg-primary text-white' : 'bg-gray-600 hover:bg-gray-500 text-white'} transition">${p}</button>
+                    `).join('')}
+                    <button onclick="${callbackName}(${page + 1})" class="px-2 py-1 rounded ${page >= totalPages ? 'bg-gray-700 text-gray-500 cursor-not-allowed' : 'bg-primary hover:bg-primary/80 text-white'} transition" ${page >= totalPages ? 'disabled' : ''}>末页</button>
+                </div>
+            `;
+        }
+
+        function deepSearch() {
+            // 搜索时重置到第一页，由 loadDeepAnalysisList 处理搜索逻辑
+            window.deepListState[currentDeepSubTab].page = 1;
+            loadDeepAnalysisList();
+        }
+
+        async function viewDeepAnalysis(type, name, filePath) {
+            currentDeepAnalysisTarget = { type, name, file_path: filePath };
+            try {
+                // 先尝试获取缓存结果
+                const res = await fetch(`/api/${currentProject}/deep-analysis/get?target_type=${type}&target_name=${encodeURIComponent(name)}&file_path=${encodeURIComponent(filePath)}`);
+                const data = await res.json();
+                if (data && data.success && data.data) {
+                    renderDeepAnalysisResult(data.data);
+                } else {
+                    // 没有缓存，开始分析
+                    startDeepAnalysis(type, name, filePath);
+                }
+            } catch (e) {
+                startDeepAnalysis(type, name, filePath);
+            }
+        }
+
+        async function startDeepAnalysis(type, name, filePath) {
+            currentDeepAnalysisTarget = { type, name, file_path: filePath };
+            const detailDiv = document.getElementById('deepAnalysisDetail');
+
+            detailDiv.innerHTML = `
+                <div class="text-center py-20">
+                    <div class="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                    <p class="text-lg">正在分析 <span class="text-accent font-mono">${name}</span></p>
+                    <p class="text-sm text-gray-400 mt-2">AI 正在收集上下文并进行深度分析...</p>
+                </div>
+            `;
+
+            try {
+                const res = await fetch('/api/deep-analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        project_name: currentProject,
+                        target_type: type,
+                        target_name: name,
+                        file_path: filePath,
+                        force_refresh: false
+                    })
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || '分析失败');
+                }
+
+                const result = await res.json();
+                if (result.success) {
+                    renderDeepAnalysisResult(result.data);
+                    // 刷新列表
+                    if (currentDeepSubTab === 'analyzed') {
+                        loadDeepAnalysisList();
+                    }
+                } else {
+                    throw new Error('分析失败');
+                }
+            } catch (e) {
+                detailDiv.innerHTML = `
+                    <div class="text-center py-20">
+                        <svg class="w-16 h-16 mx-auto mb-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        <p class="text-lg text-red-400">分析失败</p>
+                        <p class="text-sm text-gray-400 mt-2">${e.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        function renderDeepAnalysisResult(result) {
+            const detailDiv = document.getElementById('deepAnalysisDetail');
+            const typeBadge = result.target_type === 'class' ? 'bg-secondary/20 text-secondary' : 'bg-accent/20 text-accent';
+
+            // 简单 Markdown 渲染
+            const renderMarkdown = (text) => {
+                if (!text) return '';
+                let html = escapeHtml(text);
+
+                // 多行代码块 ```code```
+                html = html.replace(/```([\s\S]*?)```/g, '<pre class="bg-gray-900 p-3 rounded my-2 overflow-x-auto text-sm text-green-300">$1</pre>');
+
+                // 行内代码 `code`
+                html = html.replace(/`([^`]+)`/g, '<code class="bg-gray-900 text-green-300 px-1.5 py-0.5 rounded text-sm">$1</code>');
+
+                // 粗体 **text**
+                html = html.replace(/\*\*([^*]+)\*\*/g, '<strong class="text-white">$1</strong>');
+
+                // 斜体 *text*
+                html = html.replace(/\*([^*]+)\*/g, '<em class="text-gray-300">$1</em>');
+
+                // 无序列表 - 开头的 - item
+                html = html.replace(/^- (.+)$/gm, '<li class="ml-4">$1</li>');
+
+                // 有序列表 1. item
+                html = html.replace(/^\d+\. (.+)$/gm, '<li class="ml-4">$1</li>');
+
+                // 标题 ###
+                html = html.replace(/^### (.+)$/gm, '<h4 class="text-white font-semibold mt-3 mb-1">$1</h4>');
+                html = html.replace(/^## (.+)$/gm, '<h3 class="text-white font-semibold mt-3 mb-1">$1</h3>');
+                html = html.replace(/^# (.+)$/gm, '<h2 class="text-white font-bold mt-3 mb-2">$1</h2>');
+
+                // 换行转 <br>
+                html = html.replace(/\n/g, '<br>');
+
+                return html;
+            };
+
+            // 格式化数组
+            const formatArray = (arr) => {
+                if (!arr || arr.length === 0) return '<span class="text-gray-500">无</span>';
+                return arr.map(x => `<span class="badge bg-gray-700 mr-1 mb-1">${x}</span>`).join('');
+            };
+
+            // 格式化执行流程
+            const formatFlow = (flow) => {
+                if (!flow) return '';
+                if (Array.isArray(flow)) {
+                    return flow.map((step, i) => `<div class="flex items-start gap-2 mb-2"><span class="badge bg-primary/30 text-primary mt-0.5">${i + 1}</span><span class="text-gray-200">${renderMarkdown(step)}</span></div>`).join('');
+                }
+                return renderMarkdown(flow);
+            };
+
+            // 格式化改进建议
+            const formatImprovements = (improvements) => {
+                if (!improvements || (Array.isArray(improvements) && improvements.length === 0) || (!Array.isArray(improvements) && !improvements)) {
+                    return '<span class="text-gray-500">暂无改进建议</span>';
+                }
+                if (Array.isArray(improvements)) {
+                    return improvements.map((item, i) => `
+                        <div class="flex items-start gap-2 mb-2">
+                            <span class="badge bg-green-900/50 text-green-400 mt-0.5">${i + 1}</span>
+                            <div class="text-gray-200">${renderMarkdown(item)}</div>
+                        </div>
+                    `).join('');
+                }
+                return renderMarkdown(improvements);
+            };
+
+            detailDiv.innerHTML = `
+                <div class="max-w-4xl mx-auto">
+                    <!-- 标题区 -->
+                    <div class="flex items-start justify-between mb-6">
+                        <div>
+                            <div class="flex items-center gap-3 mb-2">
+                                <span class="badge ${typeBadge} text-sm">${result.target_type}</span>
+                                ${result.manually_corrected ? '<span class="badge bg-warning/20 text-warning">✏️ 人工纠正</span>' : ''}
+                                <span class="badge bg-success/20 text-success">✓ 已分析</span>
+                            </div>
+                            <h2 class="text-2xl font-bold">${result.target_name}</h2>
+                            <p class="text-sm text-gray-400 mt-1">${result.file_path} (${result.start_line}-${result.end_line})</p>
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="startDeepAnalysis(currentDeepAnalysisTarget.type, currentDeepAnalysisTarget.name, currentDeepAnalysisTarget.file_path, true)" class="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm transition flex items-center gap-1">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                                </svg>
+                                重新分析
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 1. 摘要 -->
+                    <div class="bg-gray-800 rounded-xl border border-gray-700 p-5 mb-4">
+                        <h3 class="text-lg font-semibold mb-3 flex items-center gap-2">
+                            <span class="text-accent">📝</span> 核心摘要
+                        </h3>
+                        <div class="text-gray-200 prose prose-invert">${renderMarkdown(result.summary || '-')}</div>
+                    </div>
+
+                    <!-- 2. 用途与职责 -->
+                    <div class="bg-gray-800 rounded-xl border border-gray-700 p-5 mb-4">
+                        <h3 class="text-lg font-semibold mb-3 flex items-center gap-2">
+                            <span class="text-primary">🎯</span> 用途与职责
+                        </h3>
+                        <div class="text-gray-200 prose prose-invert">${renderMarkdown(result.purpose || '-')}</div>
+                    </div>
+
+                    <!-- 3. 执行流程 -->
+                    <div class="bg-gray-800 rounded-xl border border-gray-700 p-5 mb-4">
+                        <h3 class="text-lg font-semibold mb-3 flex items-center gap-2">
+                            <span class="text-secondary">🔄</span> 执行流程
+                        </h3>
+                        <div class="prose prose-invert">${formatFlow(result.flow)}</div>
+                    </div>
+
+                    <!-- 4. 依赖与副作用 -->
+                    <div class="grid grid-cols-2 gap-4 mb-4">
+                        <div class="bg-gray-800 rounded-xl border border-gray-700 p-5">
+                            <h3 class="text-lg font-semibold mb-3 flex items-center gap-2">
+                                <span class="text-accent">📦</span> 外部依赖
+                            </h3>
+                            <div class="flex flex-wrap">${formatArray(result.dependencies)}</div>
+                        </div>
+                        <div class="bg-gray-800 rounded-xl border border-gray-700 p-5">
+                            <h3 class="text-lg font-semibold mb-3 flex items-center gap-2">
+                                <span class="text-warning">⚠️</span> 副作用
+                            </h3>
+                            <div class="flex flex-wrap">${formatArray(result.side_effects)}</div>
+                        </div>
+                    </div>
+
+                    <!-- 5. 性能与边界情况 -->
+                    <div class="grid grid-cols-2 gap-4 mb-4">
+                        <div class="bg-gray-800 rounded-xl border border-gray-700 p-5">
+                            <h3 class="text-lg font-semibold mb-3 flex items-center gap-2">
+                                <span class="text-secondary">⚡</span> 性能注意事项
+                            </h3>
+                            <div class="text-gray-200 prose prose-invert">${renderMarkdown(result.performance_notes || '-')}</div>
+                        </div>
+                        <div class="bg-gray-800 rounded-xl border border-gray-700 p-5">
+                            <h3 class="text-lg font-semibold mb-3 flex items-center gap-2">
+                                <span class="text-accent">🔲</span> 边界情况
+                            </h3>
+                            <div class="flex flex-wrap">${formatArray(result.edge_cases)}</div>
+                        </div>
+                    </div>
+
+                    <!-- 6. 安全风险 -->
+                    <div class="bg-gray-800 rounded-xl border border-gray-700 p-5 mb-4">
+                        <h3 class="text-lg font-semibold mb-3 flex items-center gap-2">
+                            <span class="text-red-400">🔒</span> 安全风险
+                        </h3>
+                        <div class="text-gray-200 prose prose-invert">${renderMarkdown(result.security_notes || '-')}</div>
+                    </div>
+
+                    <!-- 7. 改进建议 -->
+                    <div class="bg-gray-800 rounded-xl border border-gray-700 p-5 mb-4">
+                        <h3 class="text-lg font-semibold mb-3 flex items-center gap-2">
+                            <span class="text-green-400">💡</span> 改进建议
+                        </h3>
+                        <div class="text-gray-200 space-y-2">
+                            ${formatImprovements(result.improvements)}
+                        </div>
+                    </div>
+
+                    <!-- 8. 分析信息 -->
+                    <div class="bg-gray-800/50 rounded-xl border border-gray-700 p-4">
+                        <h3 class="text-sm font-semibold mb-2 text-gray-400">分析元信息</h3>
+                        <div class="grid grid-cols-4 gap-4 text-xs text-gray-400">
+                            <div>
+                                <div class="text-gray-500">代码哈希</div>
+                                <div class="font-mono text-gray-300">${result.code_hash ? result.code_hash.substring(0, 16) + '...' : '-'}</div>
+                            </div>
+                            <div>
+                                <div class="text-gray-500">上下文片段</div>
+                                <div class="text-gray-300">${result.context_used ? result.context_used.length : 0} 个</div>
+                            </div>
+                            <div>
+                                <div class="text-gray-500">Token 消耗</div>
+                                <div class="text-gray-300">${result.token_usage ? result.token_usage.total : '-'} tokens</div>
+                            </div>
+                            <div>
+                                <div class="text-gray-500">分析版本</div>
+                                <div class="text-gray-300">${result.analysis_version || '1.0'}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html>

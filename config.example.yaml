@@ -1,0 +1,59 @@
+# ===== LLM 配置 =====
+llm:
+  api_key: ""  # 推荐通过环境变量 LLM_API_KEY 设置
+  base_url: "https://ark.cn-beijing.volces.com/api/v3"
+  model: "doubao-seed-2.0-pro"
+  temperature: 0.1
+  max_tokens: 4000
+  timeout: 300  # 秒
+
+# ===== 代码扫描配置 =====
+scanner:
+  exclude_dirs:
+    - "node_modules"
+    - "__pycache__"
+    - ".git"
+    - "venv"
+    - "dist"
+    - "build"
+    - "bin"
+    - "obj"
+  exclude_files:
+    - "*.pyc"
+    - "*.dll"
+    - "*.exe"
+    - "*.min.js"
+  max_file_size: 5242880  # 5MB
+
+# ===== 分析配置（重点！隐私保护） =====
+analysis:
+  use_llm: true
+
+  # ===== 🔒 LLM 隐私保护配置 =====
+  # 分析深度
+  # - minimal: 仅做架构和业务分析，不分析单个函数/类
+  # - standard: 分析核心类和核心方法（默认推荐）
+  # - full: 分析所有类和所有方法
+  llm_analysis_depth: "standard"
+
+  # 是否把函数实现代码发送给 LLM
+  # ⚠️ 开启 = 你的代码会发送到第三方 API 服务商
+  #    关闭 = 只发送函数签名（名称、参数、返回值），不发实现
+  llm_send_function_code: false
+
+  # 是否把类的方法实现代码发送给 LLM
+  llm_send_class_code: false
+
+  # 是否只分析核心模块
+  # true = 跳过 utils, helpers, infrastructure, extensions 等工具类目录
+  llm_only_core_modules: true
+
+  # 是否跳过简单方法（节省 Token，也减少代码泄露面积）
+  # true = 跳过 getter, setter, toString, equals, hashCode, Dispose 等
+  llm_skip_simple_methods: true
+
+# ===== 输出配置 =====
+output:
+  format: "markdown"  # markdown / html
+  include_call_graph: true
+  include_llm_summary: true

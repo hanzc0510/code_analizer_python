@@ -1,0 +1,36 @@
+# Core dependencies
+tree-sitter==0.22.2
+tree-sitter-python==0.21.0
+tree-sitter-java==0.21.0
+tree-sitter-c-sharp==0.21.0
+tree-sitter-javascript==0.21.0
+tree-sitter-typescript==0.21.0
+
+# LLM Integration
+openai>=1.60.0
+tiktoken>=0.8.0
+
+# Data structures
+networkx==3.3
+pydantic==2.12.5
+
+# Configuration and templates
+pyyaml==6.0.2
+jinja2==3.1.4
+
+# CLI and UI
+rich==13.9.2
+click==8.1.7
+
+# Web
+fastapi>=0.100.0
+uvicorn>=0.20.0
+
+# Utilities
+python-dotenv==1.0.1
+pathlib2==2.3.7.post1
+typing-extensions>=4.14.1
+
+# Testing
+pytest==8.3.3
+pytest-asyncio==0.24.0
