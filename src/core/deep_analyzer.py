@@ -687,6 +687,317 @@ class DeepAnalyzer:
 
         return analysis
 
+    async def analyze_function_stream(self, func: FunctionDef, class_name: str = None,
+                                      module_path: str = "", force_refresh: bool = False,
+                                      additional_context: str = ""):
+        """
+        流式深度分析函数，逐 token 返回分析过程，最后返回完整结果
+        Yields:
+            - {"type": "stream", "content": "token"}: 流式内容
+            - {"type": "context", "snippets": [...]}: 上下文信息
+            - {"type": "cache_hit", "result": {...}}: 命中缓存
+            - {"type": "complete", "result": {...}}: 分析完成，返回最终结果
+        """
+        full_name = f"{class_name}.{func.name}" if class_name else func.name
+        code_hash = self._compute_code_hash(func.content or full_name)
+
+        # 先查缓存
+        if not force_refresh:
+            cached = self._get_cached_analysis("function", full_name, module_path, code_hash)
+            if cached:
+                logger.info(f"[OK] Using cached analysis for: {full_name}")
+                yield {"type": "cache_hit", "result": asdict(cached)}
+                return
+
+        logger.info(f"[Search] Deep analyzing function (stream): {full_name}")
+
+        # ========== 智能获取上下文 ==========
+        context_snippets = self._get_smart_context(func, class_name)
+        logger.info(f"   Collected {len(context_snippets)} context snippets")
+
+        # 发送上下文信息给前端
+        yield {
+            "type": "context",
+            "snippets": [
+                {"type": s.type, "name": s.name, "relevance": s.relevance}
+                for s in context_snippets
+            ]
+        }
+
+        # ========== 构建 Prompt ==========
+        context_text = self._format_context(context_snippets)
+
+        system_prompt = """你是一位世界级的代码架构师和代码审计专家。请深度分析这段代码并给出可执行的优化建议。
+
+分析要求：
+1. 准确理解代码的真实意图和业务逻辑
+2. 分析执行流程，识别关键决策点和数据流转
+3. 识别所有外部依赖、副作用和隐藏耦合
+4. 找出潜在的 bug、边界情况、性能瓶颈
+5. 【重要】给出具体的改进建议，包含：
+   - 每个建议必须说明问题所在和改进收益
+   - 尽可能提供重构后的代码示例（使用正确的语法）
+   - 指出涉及的相关文件或依赖项
+   - 按优先级排序：高(立即修复) > 中(建议优化) > 低(后续考虑)
+
+输出格式（严格 JSON，不要其他文字）：
+{
+  "summary": "一句话总结这个函数的核心作用",
+  "purpose": "详细说明这个函数的用途和职责",
+  "flow": "执行流程分析，分点说明关键步骤和决策逻辑",
+  "dependencies": ["依赖1", "依赖2", "外部系统/库/其他类"],
+  "side_effects": ["副作用1", "副作用2", "修改数据库/发请求/改全局状态等"],
+  "performance_notes": "性能分析和注意点（时间复杂度、内存、IO等）",
+  "edge_cases": ["边界情况1", "边界情况2", "可能出问题的地方"],
+  "security_notes": "安全风险分析（SQL注入、XSS、权限、空指针等）",
+  "improvements": [
+    "【高】问题描述：xxx，建议：xxx，相关文件：xxx",
+    "【中】问题描述：xxx，代码示例：xxx"
+  ]
+}"""
+
+        user_prompt = f"""
+【待分析函数】
+{full_name}
+文件: {module_path}
+行号: {func.start_line}-{func.end_line}
+
+【函数完整代码】
+```
+{func.content or "(code unavailable)"}
+```
+
+【相关上下文（供参考）】
+{context_text}
+
+【额外引导信息】
+{additional_context or "无"}
+
+请按要求的 JSON 格式输出深度分析结果。
+"""
+
+        # ========== 流式调用 LLM ==========
+        full_result = ""
+        async for token in self.llm._call_llm_stream(user_prompt, system_prompt):
+            full_result += token
+            yield {"type": "stream", "content": token}
+
+        # ========== 解析结果 ==========
+        result = full_result
+        import json
+        try:
+            if "```json" in result:
+                start = result.find("```json") + 7
+                end = result.find("```", start)
+                result = result[start:end].strip()
+            elif "{" in result:
+                start = result.find("{")
+                end = result.rfind("}") + 1
+                result = result[start:end]
+
+            parsed = json.loads(result)
+        except Exception as e:
+            logger.warning(f"Failed to parse LLM result: {e}, falling back to raw")
+            parsed = {
+                "summary": result[:200],
+                "purpose": result,
+                "flow": "",
+                "dependencies": [],
+                "side_effects": [],
+                "performance_notes": "",
+                "edge_cases": [],
+                "security_notes": ""
+            }
+
+        # ========== 构建结果 ==========
+        analysis = AnalysisResult(
+            target_type="function",
+            target_name=full_name,
+            file_path=module_path,
+            start_line=func.start_line,
+            end_line=func.end_line,
+            summary=parsed.get("summary", ""),
+            purpose=parsed.get("purpose", ""),
+            flow=parsed.get("flow", ""),
+            dependencies=parsed.get("dependencies", []),
+            side_effects=parsed.get("side_effects", []),
+            performance_notes=parsed.get("performance_notes", ""),
+            edge_cases=parsed.get("edge_cases", []),
+            security_notes=parsed.get("security_notes", ""),
+            improvements=parsed.get("improvements", []),
+            context_used=[
+                {"type": s.type, "name": s.name, "relevance": s.relevance}
+                for s in context_snippets
+            ],
+            code_hash=code_hash,
+            manually_corrected=bool(additional_context)
+        )
+
+        # ========== 保存到缓存 ==========
+        self._save_analysis(analysis)
+        logger.info(f"[OK] Analysis complete for: {full_name}")
+
+        yield {"type": "complete", "result": asdict(analysis)}
+
+    async def analyze_class_stream(self, cls, module_path: str = "",
+                                    force_refresh: bool = False,
+                                    additional_context: str = ""):
+        """
+        流式深度分析类，逐 token 返回分析过程，最后返回完整结构化结果
+        """
+        code_hash = self._compute_code_hash(
+            ''.join(m.content or m.name for m in cls.methods) + cls.name
+        )
+
+        # 先查缓存
+        if not force_refresh:
+            cached = self._get_cached_analysis("class", cls.name, module_path, code_hash)
+            if cached:
+                logger.info(f"[OK] Using cached analysis for class: {cls.name}")
+                yield {"type": "cache_hit", "result": asdict(cached)}
+                return
+
+        logger.info(f"[Search] Deep analyzing class (stream): {cls.name}")
+
+        # ========== 构建上下文 ==========
+        # 1. 类的所有方法（带代码）
+        methods_text = ""
+        for method in cls.methods:
+            sig = self._get_func_signature(method)
+            methods_text += f"\n--- {method.name} ---\n"
+            methods_text += f"Signature: {sig}\n"
+            if method.content and len(method.content) < 3000:
+                methods_text += f"Code:\n{method.content}\n"
+            else:
+                methods_text += f"Lines: {method.end_line - method.start_line}\n"
+
+        # 2. 父类和基类信息
+        base_classes_text = ""
+        for base_name in cls.bases[:5]:
+            base_cls = self._find_class(base_name)
+            if base_cls:
+                base_classes_text += f"\n=== 父类 {base_name} ===\n"
+                base_classes_text += f"Methods: {', '.join([m.name for m in base_cls.methods[:10]])}\n"
+
+        # 3. 子类和相关类
+        related_classes_text = ""
+        for module in self.project.modules:
+            for other_cls in module.classes[:5]:
+                if other_cls.name != cls.name and cls.name in other_cls.bases:
+                    related_classes_text += f"\n=== 子类 {other_cls.name} ===\n"
+                    related_classes_text += f"Methods: {', '.join([m.name for m in other_cls.methods[:8]])}\n"
+
+        # 发送上下文信息
+        yield {
+            "type": "context",
+            "snippets": [
+                {"type": "class", "name": cls.name, "methods_count": len(cls.methods)},
+                {"type": "base_classes", "count": len(cls.bases)}
+            ]
+        }
+
+        system_prompt = """你是一位世界级的代码架构师和代码审计专家。请深度分析这个类并给出可执行的优化建议。
+
+分析要求：
+1. 评估类的单一职责原则，指出职责过多的地方
+2. 分析类的依赖关系，识别不合理的耦合
+3. 评估继承关系和接口设计的合理性
+4. 找出潜在的性能问题和可维护性问题
+5. 【重要】给出具体的改进建议，包含：
+   - 每个建议必须说明：问题描述、改进收益、重构难度
+   - 尽可能提供重构后的代码示例
+   - 指出涉及的相关文件或依赖项
+   - 按优先级排序：高(立即修复) > 中(建议优化) > 低(后续考虑)
+
+输出格式（严格 JSON）：
+{
+  "summary": "一句话总结类的核心作用",
+  "purpose": "详细说明这个类的业务职责和在系统中的定位",
+  "flow": "核心执行流程（如果是生命周期类，说明各个阶段）",
+  "dependencies": ["依赖的类", "依赖的外部系统", "依赖的库"],
+  "design_patterns": ["使用的设计模式1", "模式2"],
+  "strengths": ["设计优点1", "优点2"],
+  "weaknesses": ["设计缺陷1", "潜在问题2"],
+  "side_effects": ["副作用列表"],
+  "performance_notes": "性能相关分析",
+  "security_notes": "安全风险分析",
+  "improvements": [
+    "【高】问题描述：xxx，建议：xxx，相关文件：xxx",
+    "【中】问题描述：xxx，代码示例：xxx"
+  ]
+}"""
+
+        user_prompt = f"""
+【待分析类】
+{cls.name}
+文件: {module_path}
+行号: {cls.start_line}-{cls.end_line}
+父类: {', '.join(cls.bases) if cls.bases else '无'}
+方法数: {len(cls.methods)}
+
+【类中所有方法】
+{methods_text}
+
+【父类/基类信息】
+{base_classes_text or "无额外基类信息"}
+
+【子类/相关类信息】
+{related_classes_text or "无相关子类信息"}
+
+【额外引导信息】
+{additional_context or "无"}
+
+请按要求的 JSON 格式输出深度分析结果。
+"""
+
+        # ========== 流式调用 LLM ==========
+        full_result = ""
+        async for token in self.llm._call_llm_stream(user_prompt, system_prompt):
+            full_result += token
+            yield {"type": "stream", "content": token}
+
+        # ========== 解析结果 ==========
+        result = full_result
+        import json
+        try:
+            if "```json" in result:
+                start = result.find("```json") + 7
+                end = result.find("```", start)
+                result = result[start:end].strip()
+            elif "{" in result:
+                start = result.find("{")
+                end = result.rfind("}") + 1
+                result = result[start:end]
+
+            parsed = json.loads(result)
+        except Exception as e:
+            logger.warning(f"Failed to parse class analysis (stream): {e}")
+            parsed = {"summary": result[:200], "purpose": result}
+
+        analysis = AnalysisResult(
+            target_type="class",
+            target_name=cls.name,
+            file_path=module_path,
+            start_line=cls.start_line,
+            end_line=cls.end_line,
+            summary=parsed.get("summary", ""),
+            purpose=parsed.get("purpose", ""),
+            flow=parsed.get("flow", ""),
+            dependencies=parsed.get("dependencies", []),
+            side_effects=parsed.get("side_effects", []),
+            performance_notes=parsed.get("performance_notes", ""),
+            edge_cases=parsed.get("weaknesses", []),
+            security_notes=parsed.get("security_notes", ""),
+            improvements=parsed.get("improvements", []),
+            code_hash=code_hash,
+            manually_corrected=bool(additional_context)
+        )
+
+        self._save_analysis(analysis)
+        logger.info(f"[OK] Class analysis complete (stream): {cls.name}")
+
+        yield {"type": "complete", "result": asdict(analysis)}
+
     def _format_context(self, snippets: List[CodeSnippet]) -> str:
         """格式化上下文"""
         if not snippets:

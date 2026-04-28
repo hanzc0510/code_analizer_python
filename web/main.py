@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks
 # 修复 Windows CMD 编码问题
 os.environ['PYTHONIOENCODING'] = 'utf-8'
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import sqlite3
@@ -988,17 +988,21 @@ async def analyze_new_project(request: AnalyzeNewProjectRequest):
 # ========== 🧠 深度代码分析 API ==========
 
 def _load_project(project_name: str) -> Project:
-    """加载项目（从知识数据库重建 Project 对象）"""
+    """加载项目（从知识数据库重建 Project 对象 + 从源文件读取代码内容）"""
     db_path = DB_DIR / project_name / "knowledge.db"
     if not db_path.exists():
         raise HTTPException(status_code=404, detail=f"项目不存在: {project_name}")
 
-    # 简单重建 Project 对象（只需要模块和类/方法结构）
-    project = Project(root_path=Path("."), name=project_name)
-
+    # 读取项目根路径
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
+    cursor.execute("SELECT root_path FROM projects LIMIT 1")
+    proj_row = cursor.fetchone()
+    project_root = Path(proj_row[0]) if proj_row and proj_row[0] else Path(".")
+
+    # 简单重建 Project 对象（只需要模块和类/方法结构）
+    project = Project(root_path=project_root, name=project_name)
 
     # 加载模块
     cursor.execute("SELECT id, relative_path, language FROM modules")
@@ -1018,6 +1022,17 @@ def _load_project(project_name: str) -> Project:
             language=lang
         )
 
+        # 读取源文件内容（用于提取函数代码）
+        file_content = ""
+        try:
+            full_file_path = project_root / m_row['relative_path']
+            if full_file_path.exists():
+                file_content = full_file_path.read_text(encoding='utf-8', errors='replace')
+        except Exception:
+            pass
+
+        file_lines = file_content.split('\n') if file_content else []
+
         # 加载该模块的类
         cursor.execute("SELECT id, name, start_line, end_line FROM classes WHERE module_id = ?", (m_row['id'],))
         for c_row in cursor.fetchall():
@@ -1028,6 +1043,12 @@ def _load_project(project_name: str) -> Project:
                 end_line=c_row['end_line'],
                 methods=[]
             )
+
+            # 提取类的完整代码
+            if file_lines and c_row['start_line'] and c_row['end_line']:
+                start_idx = max(0, c_row['start_line'] - 1)
+                end_idx = min(len(file_lines), c_row['end_line'])
+                cls.content = '\n'.join(file_lines[start_idx:end_idx])
 
             # 加载类的方法
             cursor.execute("SELECT name, start_line, end_line, parameters, calls FROM functions WHERE class_id = ?", (c_row['id'],))
@@ -1047,11 +1068,19 @@ def _load_project(project_name: str) -> Project:
                         ))
                     else:
                         params.append(Parameter(name=str(p)))
+
+                # 提取函数代码
+                func_content = ""
+                if file_lines and f_row['start_line'] and f_row['end_line']:
+                    start_idx = max(0, f_row['start_line'] - 1)
+                    end_idx = min(len(file_lines), f_row['end_line'])
+                    func_content = '\n'.join(file_lines[start_idx:end_idx])
+
                 func = FunctionDef(
                     name=f_row['name'],
                     start_line=f_row['start_line'],
                     end_line=f_row['end_line'],
-                    content="",
+                    content=func_content,
                     parameters=params,
                     calls=calls
                 )
@@ -1077,11 +1106,19 @@ def _load_project(project_name: str) -> Project:
                     ))
                 else:
                     params.append(Parameter(name=str(p)))
+
+            # 提取函数代码
+            func_content = ""
+            if file_lines and f_row['start_line'] and f_row['end_line']:
+                start_idx = max(0, f_row['start_line'] - 1)
+                end_idx = min(len(file_lines), f_row['end_line'])
+                func_content = '\n'.join(file_lines[start_idx:end_idx])
+
             func = FunctionDef(
                 name=f_row['name'],
                 start_line=f_row['start_line'],
                 end_line=f_row['end_line'],
-                content="",
+                content=func_content,
                 parameters=params,
                 calls=calls
             )
@@ -1124,12 +1161,16 @@ async def deep_analyze_target(request: DeepAnalyzeRequest):
     target_cls = None
     target_module = None
 
-    # Normalize request file path to forward slashes for consistent comparison
+    # 规范化文件路径，只保留文件名用于匹配（解决路径格式不一致问题）
     req_file_path = request.file_path.replace("\\", "/") if request.file_path else ""
+    req_file_name = Path(req_file_path).name if req_file_path else ""
 
     for module in project.modules:
-        if req_file_path and req_file_path not in module.relative_path:
-            continue
+        # 路径匹配：要么完全匹配，要么文件名匹配（解决绝对/相对路径差异）
+        if req_file_path:
+            module_file_name = Path(module.relative_path).name
+            if req_file_path not in module.relative_path and req_file_name != module_file_name:
+                continue
 
         # 找类
         if request.target_type == "class":
@@ -1166,7 +1207,10 @@ async def deep_analyze_target(request: DeepAnalyzeRequest):
                 break
 
     if not target:
-        raise HTTPException(status_code=404, detail=f"未找到分析目标: {request.target_type} {request.target_name}")
+        raise HTTPException(
+            status_code=404,
+            detail=f"未找到分析目标: {request.target_type} '{request.target_name}' (path: {request.file_path})"
+        )
 
     # 4. 执行深度分析
     if request.target_type == "function":
@@ -1192,6 +1236,136 @@ async def deep_analyze_target(request: DeepAnalyzeRequest):
         "data": result,
         "from_cache": not request.force_refresh and not request.additional_context
     }
+
+
+@app.post("/api/deep-analyze/stream")
+async def deep_analyze_stream(request: DeepAnalyzeRequest):
+    """
+    流式深度代码分析（实时显示模型思考过程）
+    逐 token 返回分析过程，最后返回完整结构化结果
+    """
+    # 1. 加载项目
+    project = _load_project(request.project_name)
+
+    # 2. 初始化 LLM 客户端和分析器
+    config = Config()
+    llm = LLMClient(config)
+    if not llm.llm_enabled:
+        raise HTTPException(status_code=400, detail="LLM 未配置")
+
+    analyzer = DeepAnalyzer(
+        project=project,
+        llm_client=llm,
+        db_path=str(DB_DIR / request.project_name / "knowledge.db")
+    )
+
+    # 3. 查找分析目标
+    target = None
+    target_cls = None
+    target_module = None
+    analyzer_method = None
+    analyzer_kwargs = {}
+
+    # 规范化文件路径，只保留文件名用于匹配（解决路径格式不一致问题）
+    req_file_path = request.file_path.replace("\\", "/") if request.file_path else ""
+    req_file_name = Path(req_file_path).name if req_file_path else ""
+
+    for module in project.modules:
+        # 路径匹配：要么完全匹配，要么文件名匹配（解决绝对/相对路径差异）
+        if req_file_path:
+            module_file_name = Path(module.relative_path).name
+            if req_file_path not in module.relative_path and req_file_name != module_file_name:
+                continue
+
+        # 找类
+        if request.target_type == "class":
+            for cls in module.classes:
+                if cls.name == request.target_name:
+                    target = cls
+                    target_module = module
+                    break
+            if target:
+                break
+
+        # 找方法
+        elif request.target_type == "function":
+            if "." in request.target_name:
+                cls_name, func_name = request.target_name.split(".", 1)
+                for cls in module.classes:
+                    if cls.name == cls_name:
+                        for method in cls.methods:
+                            if method.name == func_name:
+                                target = method
+                                target_cls = cls_name
+                                target_module = module
+                                break
+                        break
+            else:
+                for func in module.functions:
+                    if func.name == request.target_name:
+                        target = func
+                        target_module = module
+                        break
+            if target:
+                break
+
+    if not target:
+        # 调试：打印详细信息
+        all_classes = []
+        all_funcs = []
+        for module in project.modules:
+            for cls in module.classes:
+                all_classes.append(f"{cls.name} ({module.relative_path})")
+            for func in module.functions:
+                all_funcs.append(f"{func.name} ({module.relative_path})")
+            for cls in module.classes:
+                for method in cls.methods:
+                    all_funcs.append(f"{cls.name}.{method.name} ({module.relative_path})")
+
+        print(f"[DEBUG] 查找目标失败: type={request.target_type}, name='{request.target_name}', path='{request.file_path}'")
+        print(f"[DEBUG] 项目名: {request.project_name}")
+        print(f"[DEBUG] 可用类 ({len(all_classes)}): {', '.join(all_classes[:10])}")
+        print(f"[DEBUG] 可用函数 ({len(all_funcs)}): {', '.join(all_funcs[:15])}")
+
+        raise HTTPException(
+            status_code=404,
+            detail=f"未找到分析目标: {request.target_type} '{request.target_name}' (path: {request.file_path})"
+        )
+
+    # 4. 根据目标类型选择分析方法
+    if request.target_type == "function":
+        analyzer_method = analyzer.analyze_function_stream
+        analyzer_kwargs = {
+            "func": target,
+            "class_name": target_cls,
+            "module_path": target_module.relative_path if target_module else "",
+            "force_refresh": request.force_refresh,
+            "additional_context": request.additional_context or ""
+        }
+    elif request.target_type == "class":
+        analyzer_method = analyzer.analyze_class_stream
+        analyzer_kwargs = {
+            "cls": target,
+            "module_path": target_module.relative_path if target_module else "",
+            "force_refresh": request.force_refresh,
+            "additional_context": request.additional_context or ""
+        }
+
+    # 5. 流式生成结果
+    async def generate():
+        async for event in analyzer_method(**analyzer_kwargs):
+            # 每个事件是 JSON 格式，便于前端解析
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
 
 
 @app.get("/api/{project_name}/deep-analysis/list")

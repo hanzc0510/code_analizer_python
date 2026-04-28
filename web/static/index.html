@@ -1657,20 +1657,45 @@ ${result.analysis}
             }
         }
 
-        async function startDeepAnalysis(type, name, filePath) {
+        async function startDeepAnalysis(type, name, filePath, forceRefresh = false) {
             currentDeepAnalysisTarget = { type, name, file_path: filePath };
             const detailDiv = document.getElementById('deepAnalysisDetail');
 
+            // 流式分析 UI：显示实时思考过程 + 最终结果
             detailDiv.innerHTML = `
-                <div class="text-center py-20">
-                    <div class="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                    <p class="text-lg">正在分析 <span class="text-accent font-mono">${name}</span></p>
-                    <p class="text-sm text-gray-400 mt-2">AI 正在收集上下文并进行深度分析...</p>
+                <div class="space-y-4">
+                    <!-- 状态信息 -->
+                    <div class="flex items-center gap-3 p-4 bg-gray-800 rounded-lg">
+                        <div id="analysisSpinner" class="w-8 h-8 border-3 border-primary border-t-transparent rounded-full animate-spin"></div>
+                        <div>
+                            <div class="font-medium">正在分析 <span class="text-accent font-mono">${name}</span></div>
+                            <div id="analysisStatus" class="text-sm text-gray-400">正在收集上下文并调用 AI...</div>
+                        </div>
+                    </div>
+
+                    <!-- 实时思考过程（流式显示） -->
+                    <div id="streamingPanel" class="hidden">
+                        <div class="flex items-center gap-2 mb-2">
+                            <span class="text-xs text-accent font-medium">🧠 AI 思考过程</span>
+                            <span class="text-xs text-gray-500">（流式更新）</span>
+                        </div>
+                        <div id="streamingContent" class="bg-gray-900 p-4 rounded-lg max-h-96 overflow-auto font-mono text-sm text-gray-300 border border-gray-700 whitespace-pre-wrap"></div>
+                    </div>
+
+                    <!-- 最终结果容器 -->
+                    <div id="finalResult"></div>
                 </div>
             `;
 
+            // 流式深度分析
+            const streamingPanel = document.getElementById('streamingPanel');
+            const streamingContent = document.getElementById('streamingContent');
+            const analysisStatus = document.getElementById('analysisStatus');
+            const finalResult = document.getElementById('finalResult');
+            let accumulatedContent = '';
+
             try {
-                const res = await fetch('/api/deep-analyze', {
+                const response = await fetch('/api/deep-analyze/stream', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -1678,24 +1703,76 @@ ${result.analysis}
                         target_type: type,
                         target_name: name,
                         file_path: filePath,
-                        force_refresh: false
+                        force_refresh: forceRefresh
                     })
                 });
 
-                if (!res.ok) {
-                    const err = await res.json();
+                if (!response.ok) {
+                    const err = await response.json();
                     throw new Error(err.detail || '分析失败');
                 }
 
-                const result = await res.json();
-                if (result.success) {
-                    renderDeepAnalysisResult(result.data);
-                    // 刷新列表
-                    if (currentDeepSubTab === 'analyzed') {
-                        loadDeepAnalysisList();
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n');
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const dataStr = line.substring(6).trim();
+                            if (!dataStr) continue;
+
+                            try {
+                                const event = JSON.parse(dataStr);
+
+                                if (event.type === 'cache_hit') {
+                                    // 命中缓存，直接显示结果
+                                    analysisStatus.textContent = '命中缓存，直接复用分析结果';
+                                    document.getElementById('analysisSpinner').classList.remove('animate-spin');
+                                    renderDeepAnalysisResult(event.result);
+                                    return;
+                                }
+
+                                if (event.type === 'context') {
+                                    // 上下文收集完成
+                                    analysisStatus.textContent = `已收集 ${event.snippets.length} 个相关代码片段，AI 正在分析中...`;
+                                    streamingPanel.classList.remove('hidden');
+                                    continue;
+                                }
+
+                                if (event.type === 'stream') {
+                                    // 流式内容更新
+                                    accumulatedContent += event.content;
+                                    streamingContent.textContent = accumulatedContent;
+                                    streamingContent.scrollTop = streamingContent.scrollHeight;
+                                    continue;
+                                }
+
+                                if (event.type === 'complete') {
+                                    // 分析完成，显示最终结构化结果
+                                    analysisStatus.textContent = '分析完成！';
+                                    document.getElementById('analysisSpinner').classList.remove('animate-spin');
+                                    streamingPanel.classList.add('hidden');
+
+                                    // 渲染结构化结果
+                                    renderDeepAnalysisResult(event.result);
+
+                                    // 刷新列表
+                                    if (currentDeepSubTab === 'analyzed') {
+                                        loadDeepAnalysisList();
+                                    }
+                                    return;
+                                }
+                            } catch (e) {
+                                console.warn('Failed to parse streaming event:', e);
+                            }
+                        }
                     }
-                } else {
-                    throw new Error('分析失败');
                 }
             } catch (e) {
                 detailDiv.innerHTML = `

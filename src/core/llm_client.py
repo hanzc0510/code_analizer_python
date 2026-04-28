@@ -170,6 +170,39 @@ class LLMClient:
 
             return ""
 
+    async def _call_llm_stream(self, prompt: str, system_prompt: str = ""):
+        """流式调用 LLM，逐 token 返回"""
+        if not self.client:
+            yield ""
+            return
+
+        try:
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+
+            logger.debug(f"📤 Sending to LLM stream ({len(prompt)} chars)...")
+            logger.debug(f"   Model: {self.config.llm.model}")
+
+            stream = await self.client.chat.completions.create(
+                model=self.config.llm.model,
+                messages=messages,
+                temperature=self.config.llm.temperature,
+                max_tokens=self.config.llm.max_tokens,
+                timeout=self.config.llm.timeout,
+                stream=True,
+            )
+
+            async for chunk in stream:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
+
+        except Exception as e:
+            error_str = str(e)
+            logger.error(f"❌ LLM stream call failed: {error_str}")
+            yield ""
+
     async def summarize_function(self, func: FunctionDef) -> str:
         """生成函数摘要"""
         if not self.client:
